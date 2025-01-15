@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -84,7 +91,12 @@ public:
    */
     virtual void EvalBootstrapSetup(const CryptoContextImpl<Element>& cc, std::vector<uint32_t> levelBudget,
                                     std::vector<uint32_t> dim1, uint32_t slots, uint32_t correctionFactor,
-                                    bool precompute) {
+                                    bool precompute, bool stcFirst, bool functional) {
+        OPENFHE_THROW("Not supported");
+    }
+
+    virtual void EvalFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
+                                       std::vector<uint32_t> dim1, uint32_t numSlots) {
         OPENFHE_THROW("Not supported");
     }
 
@@ -128,6 +140,15 @@ public:
     virtual Ciphertext<Element> EvalBootstrap(ConstCiphertext<Element> ciphertext, uint32_t numIterations,
                                               uint32_t precision) const {
         OPENFHE_THROW("EvalBootstrap is not implemented for this scheme");
+    }
+
+    virtual Ciphertext<Element> EvalStCFirstBootstrap(ConstCiphertext<Element> ciphertext) const {
+        OPENFHE_THROW("EvalStCFirstBootstrap is not implemented for this scheme");
+    }
+
+    virtual Ciphertext<Element> EvalFuncBootstrap(ConstCiphertext<Element> ciphertext, std::function<double(double)> func,
+                                                  int num_poi, int order) const {
+        OPENFHE_THROW("EvalFuncBootstrap is not implemented for this scheme");
     }
 
     /**

@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -192,6 +199,14 @@ public:
         OPENFHE_THROW("double scalar addition is not implemented for this scheme");
     }
 
+    virtual Ciphertext<Element> EvalAdd(ConstCiphertext<Element> ciphertext, std::complex<double> constant) const {
+        OPENFHE_THROW("double scalar addition is not implemented for this scheme");
+    }
+
+    virtual void EvalAddInPlace(Ciphertext<Element>& ciphertext, std::complex<double> constant) const {
+        OPENFHE_THROW("double scalar addition is not implemented for this scheme");
+    }
+
     /////////////////////////////////////////
     // SHE SUBTRACTION
     /////////////////////////////////////////
@@ -285,6 +300,14 @@ public:
     }
 
     virtual void EvalSubInPlace(Ciphertext<Element>& ciphertext, double constant) const {
+        OPENFHE_THROW("double scalar subtraction is not implemented for this scheme");
+    }
+
+    virtual Ciphertext<Element> EvalSub(ConstCiphertext<Element> ciphertext, std::complex<double> constant) const {
+        OPENFHE_THROW("double scalar subtraction is not implemented for this scheme");
+    }
+
+    virtual void EvalSubInPlace(Ciphertext<Element>& ciphertext, std::complex<double> constant) const {
         OPENFHE_THROW("double scalar subtraction is not implemented for this scheme");
     }
 
@@ -435,6 +458,14 @@ public:
         OPENFHE_THROW("double scalar multiplication is not implemented for this scheme");
     }
 
+    virtual Ciphertext<Element> EvalMult(ConstCiphertext<Element> ciphertext, std::complex<double> constant) const {
+        OPENFHE_THROW("double scalar multiplication is not implemented for this scheme");
+    }
+
+    virtual void EvalMultInPlace(Ciphertext<Element>& ciphertext, std::complex<double> constant) const {
+        OPENFHE_THROW("double scalar multiplication is not implemented for this scheme");
+    }
+
     virtual Ciphertext<DCRTPoly> MultByInteger(ConstCiphertext<DCRTPoly> ciphertext, uint64_t integer) const {
         OPENFHE_THROW("MultByInteger is not implemented for this scheme");
     }
@@ -533,6 +564,16 @@ public:
    */
     virtual void RelinearizeInPlace(Ciphertext<Element>& ciphertext,
                                     const std::vector<EvalKey<Element>>& evalKeyVec) const;
+
+
+    virtual Ciphertext<Element> EvalConj(ConstCiphertext<Element> ciphertext) const;
+    virtual void EvalConjInPlace(Ciphertext<Element>& ciphertext) const;
+
+    virtual Ciphertext<Element> EvalReal(ConstCiphertext<Element> ciphertext) const;
+    virtual void EvalRealInPlace(Ciphertext<Element>& ciphertext) const;
+
+    virtual Ciphertext<Element> EvalImag(ConstCiphertext<Element> ciphertext) const;
+    virtual void EvalImagInPlace(Ciphertext<Element>& ciphertext) const;
 
     //------------------------------------------------------------------------------
     // SHE AUTOMORPHISM
@@ -779,6 +820,9 @@ public:
 
     virtual Ciphertext<Element> MorphPlaintext(ConstPlaintext plaintext, ConstCiphertext<Element> ciphertext) const;
 
+    /*virtual Ciphertext<Element> EvalConj(ConstCiphertext<Element> ciphertext) const;*/
+    /*virtual void EvalConjInPlace(Ciphertext<Element>& ciphertext) const;*/
+
 protected:
     /////////////////////////////////////////
     // CORE OPERATIONS
@@ -852,6 +896,7 @@ protected:
     Ciphertext<Element> EvalMultCore(ConstCiphertext<Element> ciphertext, const Element& plaintext) const;
 
     void EvalMultCoreInPlace(Ciphertext<Element>& ciphertext, const Element& plaintext) const;
+
 };
 
 }  // namespace lbcrypto

@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -38,8 +45,10 @@
 #include "key/privatekey.h"
 #include "key/publickey.h"
 #include "math/chebyshev.h"
+#include "math/hermite.h"
 #include "schemerns/rns-scheme.h"
 #include "scheme/ckksrns/ckksrns-cryptoparameters.h"
+#include "utils/exception.h"
 
 namespace lbcrypto {
 
@@ -518,28 +527,69 @@ Ciphertext<Element> CryptoContextImpl<Element>::EvalChebyshevFunction(std::funct
 }
 
 template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalChebyshevFunction(std::function<std::complex<double>(double)> func,
+                                                                      ConstCiphertext<Element> ciphertext, double a,
+                                                                      double b, uint32_t degree) const {
+    std::vector<std::complex<double>> coefficients = EvalChebyshevCoefficients(func, a, b, degree);
+    return EvalChebyshevSeries(ciphertext, coefficients, a, b);
+}
+
+template <typename Element>
 Ciphertext<Element> CryptoContextImpl<Element>::EvalSin(ConstCiphertext<Element> ciphertext, double a, double b,
                                                         uint32_t degree) const {
-    return EvalChebyshevFunction([](double x) -> double { return std::sin(x); }, ciphertext, a, b, degree);
+    std::function<double(double)> func = [](double x) -> double { return std::sin(x); };
+    return EvalChebyshevFunction(func, ciphertext, a, b, degree);
 }
 
 template <typename Element>
 Ciphertext<Element> CryptoContextImpl<Element>::EvalCos(ConstCiphertext<Element> ciphertext, double a, double b,
                                                         uint32_t degree) const {
-    return EvalChebyshevFunction([](double x) -> double { return std::cos(x); }, ciphertext, a, b, degree);
+    std::function<double(double)> func = [](double x) -> double { return std::cos(x); };
+    return EvalChebyshevFunction(func, ciphertext, a, b, degree);
 }
 
 template <typename Element>
 Ciphertext<Element> CryptoContextImpl<Element>::EvalLogistic(ConstCiphertext<Element> ciphertext, double a, double b,
                                                              uint32_t degree) const {
-    return EvalChebyshevFunction([](double x) -> double { return 1 / (1 + std::exp(-x)); }, ciphertext, a, b, degree);
+    std::function<double(double)> func = [](double x) -> double { return 1 / (1 + std::exp(-x)); };
+    return EvalChebyshevFunction(func, ciphertext, a, b, degree);
 }
 
 template <typename Element>
 Ciphertext<Element> CryptoContextImpl<Element>::EvalDivide(ConstCiphertext<Element> ciphertext, double a, double b,
                                                            uint32_t degree) const {
-    return EvalChebyshevFunction([](double x) -> double { return 1 / x; }, ciphertext, a, b, degree);
+    std::function<double(double)> func = [](double x) -> double { return 1 / x; };
+    return EvalChebyshevFunction(func, ciphertext, a, b, degree);
 }
+
+//------------------------------------------------------------------------------
+// Advanced SHE HERMITE
+//------------------------------------------------------------------------------
+
+template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalHermiteFunction(std::function<double(double)> func,
+                                                                    ConstCiphertext<Element> ciphertext,
+                                                                    int p, int order) const {
+  std::vector<std::complex<double>> coefficients;
+
+  switch (order) {
+    case 1:
+      coefficients = hermiteInterpOrder1Coeff(func, p);
+      break;
+    case 2:
+      coefficients = hermiteInterpOrder2Coeff(func, p);
+      break;
+    case 3:
+      coefficients = hermiteInterpOrder3Coeff(func, p);
+      break;
+    default:
+      OPENFHE_THROW("Order of Hermite interpolation must be between 1 and 3");
+      break;
+  }
+
+  return EvalPoly(ciphertext, coefficients);
+}
+
 
 }  // namespace lbcrypto
 

@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -45,6 +52,7 @@
 #include <string>
 #include <map>
 #include <set>
+#include <complex>
 
 /**
  * @namespace lbcrypto
@@ -114,6 +122,12 @@ public:
         OPENFHE_THROW(errMsg);
     }
 
+    virtual Ciphertext<Element> EvalLinearWSum(std::vector<ConstCiphertext<Element>>& ciphertextVec,
+                                               const std::vector<std::complex<double>>& weights) const {
+        std::string errMsg = "EvalLinearWSum is not implemented for this scheme.";
+        OPENFHE_THROW(errMsg);
+    }
+
     /**
    * Function for computing the linear weighted sum of a
    * vector of ciphertexts. This is a mutable method,
@@ -125,6 +139,12 @@ public:
    */
     virtual Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
                                                       const std::vector<double>& weights) const {
+        std::string errMsg = "EvalLinearWSumMutable is not implemented for this scheme.";
+        OPENFHE_THROW(errMsg);
+    }
+
+    virtual Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
+                                                      const std::vector<std::complex<double>>& weights) const {
         std::string errMsg = "EvalLinearWSumMutable is not implemented for this scheme.";
         OPENFHE_THROW(errMsg);
     }
@@ -148,6 +168,11 @@ public:
         OPENFHE_THROW("EvalPoly is not supported for the scheme.");
     }
 
+    virtual Ciphertext<Element> EvalPoly(ConstCiphertext<Element> ciphertext,
+                                         const std::vector<std::complex<double>>& coefficients) const {
+        OPENFHE_THROW("EvalPoly is not supported for the scheme.");
+    }
+
     /**
    * Method for polynomial evaluation for polynomials represented in the power
    * series. This uses a binary tree computation of
@@ -163,7 +188,16 @@ public:
         OPENFHE_THROW("EvalPolyLinear is not supported for the scheme.");
     }
 
+    virtual Ciphertext<Element> EvalPolyLinear(ConstCiphertext<Element> ciphertext,
+                                               const std::vector<std::complex<double>>& coefficients) const {
+        OPENFHE_THROW("EvalPolyLinear is not supported for the scheme.");
+    }
+
     virtual Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> x, const std::vector<double>& coefficients) const {
+        OPENFHE_THROW("EvalPolyPS is not supported for the scheme.");
+    }
+
+    virtual Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> x, const std::vector<std::complex<double>>& coefficients) const {
         OPENFHE_THROW("EvalPolyPS is not supported for the scheme.");
     }
 
@@ -188,14 +222,31 @@ public:
         OPENFHE_THROW("EvalChebyshevSeries is not supported for the scheme.");
     }
 
+    virtual Ciphertext<Element> EvalChebyshevSeries(ConstCiphertext<Element> ciphertext,
+                                                    const std::vector<std::complex<double>>& coefficients, double a, double b) const {
+        OPENFHE_THROW("EvalChebyshevSeries is not supported for the scheme.");
+    }
+
     virtual Ciphertext<Element> EvalChebyshevSeriesLinear(ConstCiphertext<Element> ciphertext,
                                                           const std::vector<double>& coefficients, double a,
                                                           double b) const {
         OPENFHE_THROW("EvalChebyshevSeriesLinear is not supported for the scheme.");
     }
 
+    virtual Ciphertext<Element> EvalChebyshevSeriesLinear(ConstCiphertext<Element> ciphertext,
+                                                          const std::vector<std::complex<double>>& coefficients, double a,
+                                                          double b) const {
+        OPENFHE_THROW("EvalChebyshevSeriesLinear is not supported for the scheme.");
+    }
+
     virtual Ciphertext<Element> EvalChebyshevSeriesPS(ConstCiphertext<Element> ciphertext,
                                                       const std::vector<double>& coefficients, double a,
+                                                      double b) const {
+        OPENFHE_THROW("EvalChebyshevSeriesPS is not supported for the scheme.");
+    }
+
+    virtual Ciphertext<Element> EvalChebyshevSeriesPS(ConstCiphertext<Element> ciphertext,
+                                                      const std::vector<std::complex<double>>& coefficients, double a,
                                                       double b) const {
         OPENFHE_THROW("EvalChebyshevSeriesPS is not supported for the scheme.");
     }

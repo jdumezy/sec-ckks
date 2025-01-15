@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -65,8 +72,10 @@ public:
     /////////////////////////////////////////
 
     Ciphertext<DCRTPoly> EvalAdd(ConstCiphertext<DCRTPoly> ciphertext, double operand) const override;
+    Ciphertext<DCRTPoly> EvalAdd(ConstCiphertext<DCRTPoly> ciphertext, std::complex<double> operand) const override;
 
     void EvalAddInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const override;
+    void EvalAddInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const override;
 
     /////////////////////////////////////////
     // SHE SUBTRACTION
@@ -84,8 +93,10 @@ public:
     using LeveledSHERNS::EvalSubInPlace;
 
     Ciphertext<DCRTPoly> EvalSub(ConstCiphertext<DCRTPoly> ciphertext, double operand) const override;
+    Ciphertext<DCRTPoly> EvalSub(ConstCiphertext<DCRTPoly> ciphertext, std::complex<double> operand) const override;
 
     void EvalSubInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const override;
+    void EvalSubInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const override;
 
     /////////////////////////////////////////
     // SHE MULTIPLICATION
@@ -103,12 +114,23 @@ public:
     using LeveledSHEBase<DCRTPoly>::EvalMultInPlace;
 
     Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly> ciphertext, double operand) const override;
+    Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly> ciphertext, std::complex<double> operand) const override;
 
     void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const override;
+    void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const override;
 
     Ciphertext<DCRTPoly> MultByInteger(ConstCiphertext<DCRTPoly> ciphertext, uint64_t integer) const override;
 
     void MultByIntegerInPlace(Ciphertext<DCRTPoly>& ciphertext, uint64_t integer) const override;
+
+    Ciphertext<DCRTPoly> EvalConj(ConstCiphertext<DCRTPoly> ciphertext) const override;
+    void EvalConjInPlace(Ciphertext<DCRTPoly>& ciphertext) const override;
+
+    Ciphertext<DCRTPoly> EvalReal(ConstCiphertext<DCRTPoly> ciphertext) const override;
+    void EvalRealInPlace(Ciphertext<DCRTPoly>& ciphertext) const override;
+
+    Ciphertext<DCRTPoly> EvalImag(ConstCiphertext<DCRTPoly> ciphertext) const override;
+    void EvalImagInPlace(Ciphertext<DCRTPoly>& ciphertext) const override;
 
     /////////////////////////////////////
     // AUTOMORPHISM
@@ -156,6 +178,7 @@ public:
     /////////////////////////////////////
 
     void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const;
+    /*void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const;*/
 
     void AdjustLevelsAndDepthInPlace(Ciphertext<DCRTPoly>& ciphertext1,
                                      Ciphertext<DCRTPoly>& ciphertext2) const override;
@@ -165,8 +188,11 @@ public:
 
     std::vector<DCRTPoly::Integer> GetElementForEvalAddOrSub(ConstCiphertext<DCRTPoly> ciphertext,
                                                              double operand) const;
+    std::vector<std::vector<DCRTPoly::Integer>> GetElementForEvalAddOrSubComplex(ConstCiphertext<DCRTPoly> ciphertext,
+                                                                                 std::complex<double> operand) const;
 
     std::vector<DCRTPoly::Integer> GetElementForEvalMult(ConstCiphertext<DCRTPoly> ciphertext, double operand) const;
+    std::vector<DCRTPoly::Integer> GetElementForEvalMult(ConstCiphertext<DCRTPoly> ciphertext, std::complex<double> operand) const;
 
     /////////////////////////////////////
     // SERIALIZATION
@@ -186,6 +212,8 @@ public:
         return "LeveledSHECKKSRNS";
     }
 };
+
+    std::vector<DCRTPoly::Integer> ToComplex(Ciphertext<DCRTPoly>& ciphertext, std::vector<DCRTPoly::Integer> v);
 
 }  // namespace lbcrypto
 

@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -371,6 +378,47 @@ void LeveledSHEBase<Element>::RelinearizeInPlace(Ciphertext<Element>& ciphertext
     }
     cv.resize(2);
 }
+
+template <class Element>
+Ciphertext<Element> LeveledSHEBase<Element>::EvalConj(ConstCiphertext<Element> ciphertext) const {
+    auto result = ciphertext->Clone();
+    EvalConjInPlace(result);
+    return result;
+}
+
+template <class Element>
+void LeveledSHEBase<Element>::EvalConjInPlace(Ciphertext<Element>& ciphertext) const {
+}
+
+
+
+template <class Element>
+Ciphertext<Element> LeveledSHEBase<Element>::EvalReal(ConstCiphertext<Element> ciphertext) const {
+    auto result = ciphertext->Clone();
+    EvalRealInPlace(result);
+    return result;
+}
+
+template <class Element>
+void LeveledSHEBase<Element>::EvalRealInPlace(Ciphertext<Element>& ciphertext) const {
+}
+
+
+
+template <class Element>
+Ciphertext<Element> LeveledSHEBase<Element>::EvalImag(ConstCiphertext<Element> ciphertext) const {
+    auto result = ciphertext->Clone();
+    EvalImagInPlace(result);
+    return result;
+}
+
+template <class Element>
+void LeveledSHEBase<Element>::EvalImagInPlace(Ciphertext<Element>& ciphertext) const {
+}
+
+
+
+
 
 /////////////////////////////////////////
 // SHE AUTOMORPHISM

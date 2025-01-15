@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -39,6 +46,7 @@
 #include <cstdint>
 #include <functional>
 #include <vector>
+#include <complex>
 
 /**
  * @namespace lbcrypto
@@ -51,7 +59,7 @@ namespace lbcrypto {
 /**
  * Method for calculating Chebyshev coefficients for an input function
  * over the range [a,b]. These coefficents can be input into
- * EValChebyshevSeries to evaluate the function.
+ * EvalChebyshevSeries to evaluate the function.
  *
  * @param func is the function to be approximated
  * @param a - lower bound of argument for which the coefficients were found
@@ -60,6 +68,19 @@ namespace lbcrypto {
  * @return the coefficients of the Chebyshev approximation.
  */
 std::vector<double> EvalChebyshevCoefficients(std::function<double(double)> func, double a, double b, uint32_t degree);
+
+/**
+ * Method for calculating Chebyshev coefficients for an input function
+ * with complex output over the range [a,b]. These coefficents can be
+ * input into EvalChebyshevSeries to evaluate the function.
+ *
+ * @param func is the function to be approximated
+ * @param a - lower bound of argument for which the coefficients were found
+ * @param b - upper bound of argument for which the coefficients were found
+ * @param degree Desired degree of approximation
+ * @return the coefficients of the Chebyshev approximation.
+ */
+std::vector<std::complex<double>> EvalChebyshevCoefficients(std::function<std::complex<double>(double)> func, double a, double b, uint32_t degree);
 
 }  // namespace lbcrypto
 

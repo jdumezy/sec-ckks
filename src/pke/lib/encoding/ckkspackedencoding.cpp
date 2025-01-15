@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -136,10 +143,6 @@ bool CKKSPackedEncoding::Encode() {
         OPENFHE_THROW(errMsg);
     }
 
-    // clears all imaginary values as CKKS for complex numbers
-    for (size_t i = 0; i < inverse.size(); i++)
-        inverse[i].imag(0.0);
-
     inverse.resize(slots);
 
     if (this->typeFlag == IsDCRTPoly) {
@@ -254,10 +257,6 @@ bool CKKSPackedEncoding::Encode() {
                              "] is less than the size of data [" + std::to_string(inverse.size()) + "]";
         OPENFHE_THROW(errMsg);
     }
-
-    // clears all imaginary values as CKKS for complex numbers
-    for (size_t i = 0; i < inverse.size(); i++)
-        inverse[i].imag(0.0);
 
     inverse.resize(slots);
 
@@ -512,18 +511,18 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
 
     // Estimate standard deviation from 1/2 (m(X) - m(1/x)),
     // which corresponds to Im(z)
-    double stddev = StdDev(curValues, conjugate);
-
-    double logstd = std::log2(stddev);
+    /*double stddev = StdDev(curValues, conjugate);*/
+    /**/
+    /*double logstd = std::log2(stddev);*/
 
     if (executionMode == EXEC_NOISE_ESTIMATION) {
-        m_logError = logstd;
+        /*m_logError = logstd;*/
     }
     else {
         // if stddev < sqrt{N}/8 (minimum approximation error that can be achieved)
-        if (stddev < 0.125 * std::sqrt(GetElementRingDimension())) {
-            stddev = 0.125 * std::sqrt(GetElementRingDimension());
-        }
+        /*if (stddev < 0.125 * std::sqrt(GetElementRingDimension())) {*/
+        /*    stddev = 0.125 * std::sqrt(GetElementRingDimension());*/
+        /*}*/
 
         // if stddev < sqrt{N}/4 (minimum approximation error that can be achieved)
         // if (stddev < 0.125 * std::sqrt(GetElementRingDimension())) {
@@ -537,23 +536,24 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
         // }
 
         //   If less than 5 bits of precision is observed
-        if (logstd > p - 5.0)
-            OPENFHE_THROW(
-                "The decryption failed because the approximation error is "
-                "too high. Check the parameters. ");
+        /*if (logstd > p - 5.0)*/
+        /*    OPENFHE_THROW(*/
+        /*        "The decryption failed because the approximation error is "*/
+        /*        "too high. Check the parameters. ");*/
 
         // real values
         std::vector<std::complex<double>> realValues(slots);
 
         // CKKS_M_FACTOR is a compile-level parameter
         // set to 1 by default
-        stddev = sqrt(CKKS_M_FACTOR + 1) * stddev;
+        /*stddev = sqrt(CKKS_M_FACTOR + 1) * stddev;*/
 
-        double scale = 0.5 * powP;
+        /*double scale = 0.5 * powP;*/
+        double scale = powP;
 
         // TODO temporary removed errors
-        std::normal_distribution<> d(0, stddev);
-        PRNG& g = PseudoRandomNumberGenerator::GetPRNG();
+        /*std::normal_distribution<> d(0, stddev);*/
+        /*PRNG& g = PseudoRandomNumberGenerator::GetPRNG();*/
         // Alternative way to do Gaussian sampling
         // DiscreteGaussianGenerator dgg;
 
@@ -561,12 +561,14 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
         // We would add sampling only for even indices of i.
         // This change should be done together with the one below.
         for (size_t i = 0; i < slots; ++i) {
-            double real = scale * (curValues[i].real() + conjugate[i].real());
+            /*double real = scale * (curValues[i].real() + conjugate[i].real());*/
+            double real = scale * (curValues[i].real());
             // real += powP * dgg.GenerateIntegerKarney(0.0, stddev);
-            real += powP * d(g);
-            double imag = scale * (curValues[i].imag() + conjugate[i].imag());
+            /*real += powP * d(g);*/
+            /*double imag = scale * (curValues[i].imag() + conjugate[i].imag());*/
+            double imag = scale * (curValues[i].imag());
             // imag += powP * dgg.GenerateIntegerKarney(0.0, stddev);
-            imag += powP * d(g);
+            /*imag += powP * d(g);*/
             realValues[i].real(real);
             realValues[i].imag(imag);
         }
@@ -578,11 +580,12 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
         DiscreteFourierTransform::FFTSpecial(realValues, GetElementRingDimension() * 2);
 
         // clears all imaginary values for security reasons
-        for (size_t i = 0; i < realValues.size(); ++i)
-            realValues[i].imag(0.0);
+        /*for (size_t i = 0; i < realValues.size(); ++i)*/
+        /*    realValues[i].imag(0.0);*/
 
         // sets an estimate of the approximation error
-        m_logError = std::round(std::log2(stddev * std::sqrt(2 * slots)));
+        /*m_logError = std::round(std::log2(stddev * std::sqrt(2 * slots)));*/
+        m_logError = 0;
 
         value = realValues;
     }

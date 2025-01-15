@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -52,6 +59,7 @@
 #include "scheme/scheme-swch-params.h"
 
 #include "utils/caller_info.h"
+#include "utils/exception.h"
 #include "utils/serial.h"
 #include "utils/type_name.h"
 
@@ -1512,6 +1520,11 @@ public:
         return result;
     }
 
+    Ciphertext<Element> EvalAdd(ConstCiphertext<Element> ciphertext, std::complex<double> constant) const {
+        Ciphertext<Element> result = GetScheme()->EvalAdd(ciphertext, constant);
+        return result;
+    }
+
     /**
    * EvalAdd - OpenFHE EvalAdd method for a ciphertext and a real number.  Supported only in CKKS.
    * @param constant a real number
@@ -1519,6 +1532,10 @@ public:
    * @return new ciphertext for ciphertext + constant
    */
     Ciphertext<Element> EvalAdd(double constant, ConstCiphertext<Element> ciphertext) const {
+        return EvalAdd(ciphertext, constant);
+    }
+
+    Ciphertext<Element> EvalAdd(std::complex<double> constant, ConstCiphertext<Element> ciphertext) const {
         return EvalAdd(ciphertext, constant);
     }
 
@@ -1538,12 +1555,23 @@ public:
         }
     }
 
+    void EvalAddInPlace(Ciphertext<Element>& ciphertext, std::complex<double> constant) const {
+        if (constant.real() == 0 && constant.imag() == 0) {
+            return;
+        }
+        GetScheme()->EvalAddInPlace(ciphertext, constant);
+    }
+
     /**
    * In-place addition of a ciphertext and a real number.  Supported only in CKKS.
    * @param constant a real number
    * @param ciphertext input ciphertext
    */
     void EvalAddInPlace(double constant, Ciphertext<Element>& ciphertext) const {
+        EvalAddInPlace(ciphertext, constant);
+    }
+
+    void EvalAddInPlace(std::complex<double> constant, Ciphertext<Element>& ciphertext) const {
         EvalAddInPlace(ciphertext, constant);
     }
 
@@ -1652,6 +1680,12 @@ public:
         return result;
     }
 
+    Ciphertext<Element> EvalSub(ConstCiphertext<Element> ciphertext, std::complex<double> constant) const {
+        Ciphertext<Element> result =
+            GetScheme()->EvalSub(ciphertext, constant);
+        return result;
+    }
+
     /**
    * Subtraction of a ciphertext and a real number.  Supported only in CKKS.
    * @param constant a real number
@@ -1659,6 +1693,10 @@ public:
    * @return new ciphertext for constant - ciphertext
    */
     Ciphertext<Element> EvalSub(double constant, ConstCiphertext<Element> ciphertext) const {
+        return EvalAdd(EvalNegate(ciphertext), constant);
+    }
+
+    Ciphertext<Element> EvalSub(std::complex<double> constant, ConstCiphertext<Element> ciphertext) const {
         return EvalAdd(EvalNegate(ciphertext), constant);
     }
 
@@ -1676,6 +1714,13 @@ public:
         }
     }
 
+    void EvalSubInPlace(Ciphertext<Element>& ciphertext, std::complex<double> constant) const {
+        if (constant.real() == 0 && constant.imag() == 0) {
+            return;
+        }
+        GetScheme()->EvalSubInPlace(ciphertext, constant);
+    }
+
     /**
    * In-placve subtraction of ciphertext from a real number.  Supported only in CKKS.
    * @param constant a real number
@@ -1683,6 +1728,11 @@ public:
    */
     void EvalSubInPlace(double constant, Ciphertext<Element>& ciphertext) const {
         EvalNegateInPlace(ciphertext);
+        EvalAddInPlace(ciphertext, constant);
+    }
+
+    void EvalSubInPlace(std::complex<double> constant, Ciphertext<Element>& ciphertext) const {
+        /*EvalNegateInPlace(ciphertext);*/
         EvalAddInPlace(ciphertext, constant);
     }
 
@@ -1988,6 +2038,13 @@ public:
         return GetScheme()->EvalMult(ciphertext, constant);
     }
 
+    Ciphertext<Element> EvalMult(ConstCiphertext<Element> ciphertext, std::complex<double> constant) const {
+        if (!ciphertext) {
+            OPENFHE_THROW("Input ciphertext is nullptr");
+        }
+        return GetScheme()->EvalMult(ciphertext, constant);
+    }
+
     /**
    * Multiplication of a ciphertext by a real number.  Supported only in CKKS.
    * @param constant multiplier
@@ -1995,6 +2052,10 @@ public:
    * @return the result of multiplication
    */
     inline Ciphertext<Element> EvalMult(double constant, ConstCiphertext<Element> ciphertext) const {
+        return EvalMult(ciphertext, constant);
+    }
+
+    inline Ciphertext<Element> EvalMult(std::complex<double> constant, ConstCiphertext<Element> ciphertext) const {
         return EvalMult(ciphertext, constant);
     }
 
@@ -2011,6 +2072,14 @@ public:
         GetScheme()->EvalMultInPlace(ciphertext, constant);
     }
 
+    void EvalMultInPlace(Ciphertext<Element>& ciphertext, std::complex<double> constant) const {
+        if (!ciphertext) {
+            OPENFHE_THROW("Input ciphertext is nullptr");
+        }
+
+        GetScheme()->EvalMultInPlace(ciphertext, constant);
+    }
+
     /**
    * In-place multiplication of a ciphertext by a real number. Supported only in CKKS.
    * @param constant multiplier (real number)
@@ -2018,6 +2087,40 @@ public:
    */
     inline void EvalMultInPlace(double constant, Ciphertext<Element>& ciphertext) const {
         EvalMultInPlace(ciphertext, constant);
+    }
+
+    inline void EvalMultInPlace(std::complex<double> constant, Ciphertext<Element>& ciphertext) const {
+        EvalMultInPlace(ciphertext, constant);
+    }
+
+    Ciphertext<DCRTPoly> EvalConj(ConstCiphertext<DCRTPoly> ciphertext) const {
+        /*return GetScheme()->EvalConj(ciphertext);*/
+        OPENFHE_THROW("Work in progress.");
+    }
+
+    void EvalConjInPlace(Ciphertext<Element>& ciphertext) const {
+        /*GetScheme()->EvalConjInPlace(ciphertext);*/
+        OPENFHE_THROW("Work in progress.");
+    }
+
+    Ciphertext<DCRTPoly> EvalReal(ConstCiphertext<DCRTPoly> ciphertext) const {
+        /*return GetScheme()->EvalReal(ciphertext);*/
+        OPENFHE_THROW("Work in progress.");
+    }
+
+    void EvalRealInPlace(Ciphertext<Element>& ciphertext) const {
+        /*GetScheme()->EvalRealInPlace(ciphertext);*/
+        OPENFHE_THROW("Work in progress.");
+    }
+
+    Ciphertext<DCRTPoly> EvalImag(ConstCiphertext<DCRTPoly> ciphertext) const {
+        /*return GetScheme()->EvalImag(ciphertext);*/
+        OPENFHE_THROW("Work in progress.");
+    }
+
+    void EvalImagInPlace(Ciphertext<Element>& ciphertext) const {
+        /*GetScheme()->EvalImagInPlace(ciphertext);*/
+        OPENFHE_THROW("Work in progress.");
     }
 
     //------------------------------------------------------------------------------
@@ -2503,6 +2606,11 @@ public:
         return GetScheme()->EvalLinearWSum(ciphertextVec, constantVec);
     }
 
+    Ciphertext<Element> EvalLinearWSum(std::vector<ConstCiphertext<Element>>& ciphertextVec,
+                                       const std::vector<std::complex<double>>& constantVec) const {
+        return GetScheme()->EvalLinearWSum(ciphertextVec, constantVec);
+    }
+
     /**
    * EvalLinearWSum - OpenFHE EvalLinearWSum method to compute a linear
    * weighted sum. Supported only in CKKS.
@@ -2512,6 +2620,11 @@ public:
    * @return new ciphertext containing the weighted sum
    */
     Ciphertext<Element> EvalLinearWSum(const std::vector<double>& constantsVec,
+                                       std::vector<ConstCiphertext<Element>>& ciphertextVec) const {
+        return EvalLinearWSum(ciphertextVec, constantsVec);
+    }
+
+    Ciphertext<Element> EvalLinearWSum(const std::vector<std::complex<double>>& constantsVec,
                                        std::vector<ConstCiphertext<Element>>& ciphertextVec) const {
         return EvalLinearWSum(ciphertextVec, constantsVec);
     }
@@ -2529,6 +2642,11 @@ public:
         return GetScheme()->EvalLinearWSumMutable(ciphertextVec, constantsVec);
     }
 
+    Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
+                                              const std::vector<std::complex<double>>& constantsVec) const {
+        return GetScheme()->EvalLinearWSumMutable(ciphertextVec, constantsVec);
+    }
+
     /**
    * EvalLinearWSum - OpenFHE EvalLinearWSum method to compute a linear
    * weighted sum (mutable version). Supported only in CKKS.
@@ -2538,6 +2656,11 @@ public:
    * @return new ciphertext containing the weighted sum
    */
     Ciphertext<Element> EvalLinearWSumMutable(const std::vector<double>& constantsVec,
+                                              std::vector<Ciphertext<Element>>& ciphertextVec) const {
+        return EvalLinearWSumMutable(ciphertextVec, constantsVec);
+    }
+
+    Ciphertext<Element> EvalLinearWSumMutable(const std::vector<std::complex<double>>& constantsVec,
                                               std::vector<Ciphertext<Element>>& ciphertextVec) const {
         return EvalLinearWSumMutable(ciphertextVec, constantsVec);
     }
@@ -2563,6 +2686,13 @@ public:
         return GetScheme()->EvalPoly(ciphertext, coefficients);
     }
 
+    virtual Ciphertext<Element> EvalPoly(ConstCiphertext<Element> ciphertext,
+                                         const std::vector<std::complex<double>>& coefficients) const {
+        ValidateCiphertext(ciphertext);
+
+        return GetScheme()->EvalPoly(ciphertext, coefficients);
+    }
+
     /**
    * Naive method for polynomial evaluation for polynomials represented in the power
    * series (fast only for small-degree polynomials; less than 10). Uses a binary tree computation of
@@ -2580,6 +2710,13 @@ public:
         return GetScheme()->EvalPolyLinear(ciphertext, coefficients);
     }
 
+    Ciphertext<Element> EvalPolyLinear(ConstCiphertext<Element> ciphertext,
+                                       const std::vector<std::complex<double>>& coefficients) const {
+        ValidateCiphertext(ciphertext);
+
+        return GetScheme()->EvalPolyLinear(ciphertext, coefficients);
+    }
+
     /**
    * Paterson-Stockmeyer method for evaluation for polynomials represented in the power
    * series. Supported only in CKKS.
@@ -2590,6 +2727,12 @@ public:
    * @return the result of polynomial evaluation.
    */
     Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> ciphertext, const std::vector<double>& coefficients) const {
+        ValidateCiphertext(ciphertext);
+
+        return GetScheme()->EvalPolyPS(ciphertext, coefficients);
+    }
+
+    Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> ciphertext, const std::vector<std::complex<double>>& coefficients) const {
         ValidateCiphertext(ciphertext);
 
         return GetScheme()->EvalPolyPS(ciphertext, coefficients);
@@ -2619,6 +2762,13 @@ public:
         return GetScheme()->EvalChebyshevSeries(ciphertext, coefficients, a, b);
     }
 
+    Ciphertext<Element> EvalChebyshevSeries(ConstCiphertext<Element> ciphertext,
+                                            const std::vector<std::complex<double>>& coefficients, double a, double b) const {
+        ValidateCiphertext(ciphertext);
+
+        return GetScheme()->EvalChebyshevSeries(ciphertext, coefficients, a, b);
+    }
+
     /**
    * Naive linear method for evaluating Chebyshev polynomial interpolation;
    * first the range [a,b] is mapped to [-1,1] using linear transformation 1 + 2
@@ -2632,6 +2782,13 @@ public:
    */
     Ciphertext<Element> EvalChebyshevSeriesLinear(ConstCiphertext<Element> ciphertext,
                                                   const std::vector<double>& coefficients, double a, double b) const {
+        ValidateCiphertext(ciphertext);
+
+        return GetScheme()->EvalChebyshevSeriesLinear(ciphertext, coefficients, a, b);
+    }
+
+    Ciphertext<Element> EvalChebyshevSeriesLinear(ConstCiphertext<Element> ciphertext,
+                                                  const std::vector<std::complex<double>>& coefficients, double a, double b) const {
         ValidateCiphertext(ciphertext);
 
         return GetScheme()->EvalChebyshevSeriesLinear(ciphertext, coefficients, a, b);
@@ -2655,6 +2812,13 @@ public:
         return GetScheme()->EvalChebyshevSeriesPS(ciphertext, coefficients, a, b);
     }
 
+    Ciphertext<Element> EvalChebyshevSeriesPS(ConstCiphertext<Element> ciphertext,
+                                              const std::vector<std::complex<double>>& coefficients, double a, double b) const {
+        ValidateCiphertext(ciphertext);
+
+        return GetScheme()->EvalChebyshevSeriesPS(ciphertext, coefficients, a, b);
+    }
+
     /**
    * Method for calculating Chebyshev evaluation on a ciphertext for a smooth input
    * function over the range [a,b]. Supported only in CKKS.
@@ -2667,6 +2831,9 @@ public:
    * @return the coefficients of the Chebyshev approximation.
    */
     Ciphertext<Element> EvalChebyshevFunction(std::function<double(double)> func, ConstCiphertext<Element> ciphertext,
+                                              double a, double b, uint32_t degree) const;
+
+    Ciphertext<Element> EvalChebyshevFunction(std::function<std::complex<double>(double)> func, ConstCiphertext<Element> ciphertext,
                                               double a, double b, uint32_t degree) const;
 
     /**
@@ -2716,6 +2883,13 @@ public:
    * @return the result of polynomial evaluation.
    */
     Ciphertext<Element> EvalDivide(ConstCiphertext<Element> ciphertext, double a, double b, uint32_t degree) const;
+
+    //------------------------------------------------------------------------------
+    // Advanced SHE EVAL CHEBYSHEV SERIES
+    //------------------------------------------------------------------------------
+
+    Ciphertext<Element> EvalHermiteFunction(std::function<double(double)> func, ConstCiphertext<Element> ciphertext,
+                                            int p, int order) const;
 
     //------------------------------------------------------------------------------
     // Advanced SHE EVAL SUM
@@ -3300,8 +3474,15 @@ public:
    * @param precompute - flag specifying whether to precompute the plaintexts for encoding and decoding.
    */
     void EvalBootstrapSetup(std::vector<uint32_t> levelBudget = {5, 4}, std::vector<uint32_t> dim1 = {0, 0},
-                            uint32_t slots = 0, uint32_t correctionFactor = 0, bool precompute = true) {
-        GetScheme()->EvalBootstrapSetup(*this, levelBudget, dim1, slots, correctionFactor, precompute);
+                            uint32_t slots = 0, uint32_t correctionFactor = 0, bool precompute = true,
+                            bool stcFirst = false, bool functional = false) {
+        GetScheme()->EvalBootstrapSetup(*this, levelBudget, dim1, slots, correctionFactor, precompute,
+                                        stcFirst, functional);
+    }
+
+    void EvalFuncBootstrapSetup(std::vector<uint32_t> levelBudget = {5, 4}, std::vector<uint32_t> dim1 = {0, 0},
+                                uint32_t slots = 0) {
+        GetScheme()->EvalFuncBootstrapSetup(*this, levelBudget, dim1, slots);
     }
     /**
    * Generates all automorphism keys for EvalBootstrap. Supported in CKKS only.
@@ -3338,6 +3519,16 @@ public:
     Ciphertext<Element> EvalBootstrap(ConstCiphertext<Element> ciphertext, uint32_t numIterations = 1,
                                       uint32_t precision = 0) const {
         return GetScheme()->EvalBootstrap(ciphertext, numIterations, precision);
+    }
+
+
+    Ciphertext<Element> EvalStCFirstBootstrap(ConstCiphertext<Element> ciphertext) const {
+        return GetScheme()->EvalStCFirstBootstrap(ciphertext);
+    }
+
+    Ciphertext<Element> EvalFuncBootstrap(ConstCiphertext<Element> ciphertext, std::function<double(double)> func,
+                                          int num_poi, int order) const {
+        return GetScheme()->EvalFuncBootstrap(ciphertext, func, num_poi, order);
     }
 
     //------------------------------------------------------------------------------

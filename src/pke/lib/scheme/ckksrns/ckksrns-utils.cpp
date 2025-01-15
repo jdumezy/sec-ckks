@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -116,6 +123,13 @@ inline bool IsNotEqualOne(double val) {
     return false;
 }
 
+inline bool IsNotEqualOne(const std::complex<double>& val) {
+    if (std::abs(val.real() - 1.0) > PREC || std::abs(val.imag()) > PREC) {
+        return true;
+    }
+    return false;
+}
+
 uint32_t Degree(const std::vector<double>& coefficients) {
     const size_t coefficientsSize = coefficients.size();
     if (!coefficientsSize) {
@@ -129,6 +143,21 @@ uint32_t Degree(const std::vector<double>& coefficients) {
     }
 
     // indx becomes negative (-1) only when all coefficients are zeroes. in this case we return 0
+    return static_cast<uint32_t>((indx < 0) ? 0 : indx);
+}
+
+uint32_t Degree(const std::vector<std::complex<double>>& coefficients) {
+    const size_t coefficientsSize = coefficients.size();
+    if (!coefficientsSize) {
+        OPENFHE_THROW("The coefficients vector can not be empty");
+    }
+
+    int32_t indx = coefficientsSize;
+    while (--indx >= 0) {
+        if (coefficients[indx] != std::complex<double>(0.0, 0.0))
+            break;
+    }
+
     return static_cast<uint32_t>((indx < 0) ? 0 : indx);
 }
 
@@ -149,7 +178,7 @@ std::shared_ptr<longDiv> LongDivisionPoly(const std::vector<double>& f, const st
     }
 
     if (int32_t(n - k) < 0)
-        return std::make_shared<longDiv>(std::vector<double>(1), f);
+        return std::make_shared<longDiv>(std::vector<double>(0), f);
 
     std::vector<double> q(n - k + 1);
     std::vector<double> r(f);
@@ -179,6 +208,63 @@ std::shared_ptr<longDiv> LongDivisionPoly(const std::vector<double>& f, const st
     return std::make_shared<longDiv>(q, r);
 }
 
+
+
+std::shared_ptr<longDivComplex> LongDivisionPoly(const std::vector<std::complex<double>>& f, const std::vector<std::complex<double>>& g) {
+    uint32_t n = Degree(f);
+    uint32_t k = Degree(g);
+
+    if (n != f.size() - 1) {
+        OPENFHE_THROW("LongDivisionPoly: The dominant coefficient of the divident is zero.");
+    }
+
+    if (k != g.size() - 1) {
+        OPENFHE_THROW("LongDivisionPoly: The dominant coefficient of the divisor is zero.");
+    }
+
+    if (int32_t(n - k) < 0)
+        return std::make_shared<longDivComplex>(std::vector<std::complex<double>>(0), f);
+
+    std::vector<std::complex<double>> q(n - k + 1);
+    std::vector<std::complex<double>> r(f);
+    std::vector<std::complex<double>> d;
+    d.reserve(g.size() + n);
+
+    while (int32_t(n - k) >= 0) {
+        d.clear();
+        d.resize(n - k);
+        d.insert(d.end(), g.begin(), g.end());
+
+        q[n - k] = r.back();
+        if (IsNotEqualOne(g[k]))
+            q[n - k] /= g.back();
+
+        // d *= q[n - k]
+        std::transform(d.begin(), d.end(), d.begin(),
+                       std::bind(std::multiplies<std::complex<double>>(), std::placeholders::_1, q[n - k]));
+        // f-=d
+        std::transform(r.begin(), r.end(), d.begin(), r.begin(), std::minus<std::complex<double>>());
+        if (r.size() > 1) {
+            n = Degree(r);
+            r.resize(n + 1);
+        }
+    }
+
+    return std::make_shared<longDivComplex>(q, r);
+}
+
+std::shared_ptr<longDivComplex> LongDivisionPoly(const std::vector<double>& f, const std::vector<std::complex<double>>& g) {
+    std::vector<std::complex<double>> f_complex(f.begin(), f.end());
+    return LongDivisionPoly(f_complex, g);
+}
+
+std::shared_ptr<longDivComplex> LongDivisionPoly(const std::vector<std::complex<double>>& f, const std::vector<double>& g) {
+    std::vector<std::complex<double>> g_complex(g.begin(), g.end());
+    return LongDivisionPoly(f, g_complex);
+}
+
+
+
 /* f and g are vectors of Chebyshev interpolation coefficients of the two polynomials.
 We assume their dominant coefficient is not zero. LongDivisionChebyshev returns the
 vector of Chebyshev interpolation coefficients for the quotient and remainder of the
@@ -198,7 +284,7 @@ std::shared_ptr<longDiv> LongDivisionChebyshev(const std::vector<double>& f, con
     }
 
     if (int32_t(n - k) < 0)
-        return std::make_shared<longDiv>(std::vector<double>(1), f);
+        return std::make_shared<longDiv>(std::vector<double>(0), f);
 
     std::vector<double> q(n - k + 1);
     std::vector<double> r(f);
@@ -287,6 +373,122 @@ std::shared_ptr<longDiv> LongDivisionChebyshev(const std::vector<double>& f, con
     return std::make_shared<longDiv>(q, r);
 }
 
+
+
+std::shared_ptr<longDivComplex> LongDivisionChebyshev(const std::vector<std::complex<double>>& f, const std::vector<std::complex<double>>& g) {
+    uint32_t n = Degree(f);
+    uint32_t k = Degree(g);
+
+    if (n != f.size() - 1) {
+        OPENFHE_THROW("LongDivisionChebyshev: The dominant coefficient of the divident is zero.");
+    }
+
+    if (k != g.size() - 1) {
+        OPENFHE_THROW("LongDivisionChebyshev: The dominant coefficient of the divisor is zero.");
+    }
+
+    if (int32_t(n - k) < 0)
+        return std::make_shared<longDivComplex>(std::vector<std::complex<double>>(0), f);
+
+    std::vector<std::complex<double>> q(n - k + 1);
+    std::vector<std::complex<double>> r(f);
+    std::vector<std::complex<double>> d;
+    d.reserve(g.size() + n);
+
+    while (int32_t(n - k) > 0) {
+        d.clear();
+        d.resize(n + 1);
+
+        q[n - k] = 2.0 * r.back();
+        if (IsNotEqualOne(g[k]))
+            q[n - k] /= g.back();
+
+        if (int32_t(k) == int32_t(n - k)) {
+            d.front() = 2.0 * g[n - k];
+
+            for (uint32_t i = 1; i < 2 * k + 1; i++) {
+                d[i] = g[std::abs(int32_t(n - k - i))];
+            }
+        }
+        else {
+            if (int32_t(k) > int32_t(n - k)) {
+                d.front() = 2.0 * g[n - k];
+                for (uint32_t i = 1; i < k - (n - k) + 1; i++) {
+                    d[i] = g[std::abs(int32_t(n - k - i))] + g[int32_t(n - k + i)];
+                }
+                for (uint32_t i = k - (n - k) + 1; i < n + 1; i++) {
+                    d[i] = g[std::abs(int32_t(i - n + k))];
+                }
+            }
+            else {
+                d[n - k] = g.front();
+                for (uint32_t i = n - 2 * k; i < n + 1; i++) {
+                    if (i != n - k) {
+                        d[i] = g[std::abs(int32_t(i - n + k))];
+                    }
+                }
+            }
+        }
+
+        if (IsNotEqualOne(r.back())) {
+            // d *= f[n]
+            std::transform(d.begin(), d.end(), d.begin(),
+                           std::bind(std::multiplies<std::complex<double>>(), std::placeholders::_1, r.back()));
+        }
+        if (IsNotEqualOne(g.back())) {
+            // d /= g[k]
+            std::transform(d.begin(), d.end(), d.begin(),
+                           std::bind(std::divides<std::complex<double>>(), std::placeholders::_1, g.back()));
+        }
+        // f-=d
+        std::transform(r.begin(), r.end(), d.begin(), r.begin(), std::minus<std::complex<double>>());
+        if (r.size() > 1) {
+            n = Degree(r);
+            r.resize(n + 1);
+        }
+    }
+
+    if (n == k) {
+        d = g;
+
+        q.front() = r.back();
+        if (IsNotEqualOne(g.back())) {
+            q.front() /= g.back();  // q[0] /= g[k]
+        }
+        if (IsNotEqualOne(r.back())) {
+            // d *= f[n]
+            std::transform(d.begin(), d.end(), d.begin(),
+                           std::bind(std::multiplies<std::complex<double>>(), std::placeholders::_1, r.back()));
+        }
+        if (IsNotEqualOne(g.back())) {
+            // d /= g[k]
+            std::transform(d.begin(), d.end(), d.begin(),
+                           std::bind(std::divides<std::complex<double>>(), std::placeholders::_1, g.back()));
+        }
+        // f-=d
+        std::transform(r.begin(), r.end(), d.begin(), r.begin(), std::minus<std::complex<double>>());
+        if (r.size() > 1) {
+            n = Degree(r);
+            r.resize(n + 1);
+        }
+    }
+    q.front() *= 2.0;  // Because we want to have [c0] in the last spot, not [c0/2]
+
+    return std::make_shared<longDivComplex>(q, r);
+}
+
+std::shared_ptr<longDivComplex> LongDivisionChebyshev(const std::vector<double>& f, const std::vector<std::complex<double>>& g) {
+    std::vector<std::complex<double>> f_complex(f.begin(), f.end());
+    return LongDivisionPoly(f_complex, g);
+}
+
+std::shared_ptr<longDivComplex> LongDivisionChebyshev(const std::vector<std::complex<double>>& f, const std::vector<double>& g) {
+    std::vector<std::complex<double>> g_complex(g.begin(), g.end());
+    return LongDivisionPoly(f, g_complex);
+}
+
+
+
 /*	Compute positive integers k,m such that n < k(2^m-1), k is close to sqrt(n/2)
 	and the depth = ceil(log2(k))+m is minimized. Moreover, for that depth the
 	number of homomorphic multiplications = k+2m+2^(m-1)-4 is minimized.
@@ -329,6 +531,12 @@ std::vector<uint32_t> ComputeDegreesPS(const uint32_t n) {
     }
 }
 
+
+
+// ------------------------------------- //
+//           For Bootstrapping
+// ------------------------------------- //
+
 uint32_t GetMultiplicativeDepthByCoeffVector(const std::vector<double>& vec, bool isNormalized) {
     size_t vecSize = vec.size();
     if (!vecSize) {
@@ -340,6 +548,8 @@ uint32_t GetMultiplicativeDepthByCoeffVector(const std::vector<double>& vec, boo
 
     return (isNormalized) ? (multDepth - 1) : multDepth;
 }
+
+
 
 std::vector<std::complex<double>> ExtractShiftedDiagonal(const std::vector<std::vector<std::complex<double>>>& A,
                                                          int index) {
@@ -354,6 +564,8 @@ std::vector<std::complex<double>> ExtractShiftedDiagonal(const std::vector<std::
 
     return result;
 }
+
+
 
 std::vector<std::complex<double>> Rotate(const std::vector<std::complex<double>>& a, int32_t index) {
     int32_t slots = a.size();
@@ -381,6 +593,8 @@ std::vector<std::complex<double>> Rotate(const std::vector<std::complex<double>>
     return result;
 }
 
+
+
 uint32_t ReduceRotation(int32_t index, uint32_t slots) {
     int32_t islots = int32_t(slots);
 
@@ -395,6 +609,8 @@ uint32_t ReduceRotation(int32_t index, uint32_t slots) {
     return (islots + index % islots) % islots;
 }
 
+
+
 std::vector<std::complex<double>> Fill(const std::vector<std::complex<double>>& a, int slots) {
     int usedSlots = a.size();
 
@@ -406,6 +622,8 @@ std::vector<std::complex<double>> Fill(const std::vector<std::complex<double>>& 
 
     return result;
 }
+
+
 
 std::vector<std::vector<std::complex<double>>> CoeffEncodingOneLevel(const std::vector<std::complex<double>>& pows,
                                                                      const std::vector<uint32_t>& rotGroup,
@@ -457,6 +675,8 @@ std::vector<std::vector<std::complex<double>>> CoeffEncodingOneLevel(const std::
     return coeff;
 }
 
+
+
 std::vector<std::vector<std::complex<double>>> CoeffDecodingOneLevel(const std::vector<std::complex<double>>& pows,
                                                                      const std::vector<uint32_t>& rotGroup,
                                                                      bool flag_i) {
@@ -506,6 +726,8 @@ std::vector<std::vector<std::complex<double>>> CoeffDecodingOneLevel(const std::
 
     return coeff;
 }
+
+
 
 std::vector<std::vector<std::vector<std::complex<double>>>> CoeffEncodingCollapse(
     const std::vector<std::complex<double>>& pows, const std::vector<uint32_t>& rotGroup, uint32_t levelBudget,
@@ -628,6 +850,8 @@ std::vector<std::vector<std::vector<std::complex<double>>>> CoeffEncodingCollaps
 
     return coeff;
 }
+
+
 
 std::vector<std::vector<std::vector<std::complex<double>>>> CoeffDecodingCollapse(
     const std::vector<std::complex<double>>& pows, const std::vector<uint32_t>& rotGroup, uint32_t levelBudget,
@@ -759,6 +983,8 @@ std::vector<std::vector<std::vector<std::complex<double>>>> CoeffDecodingCollaps
     return coeff;
 }
 
+
+
 std::vector<uint32_t> SelectLayers(uint32_t logSlots, uint32_t budget) {
     uint32_t layers = std::ceil(static_cast<double>(logSlots) / budget);
     uint32_t rows   = logSlots / layers;
@@ -793,6 +1019,8 @@ std::vector<uint32_t> SelectLayers(uint32_t logSlots, uint32_t budget) {
 
     return {layers, rows, rem};
 }
+
+
 
 std::vector<int32_t> GetCollapsedFFTParams(uint32_t slots, uint32_t levelBudget, uint32_t dim1) {
     uint32_t logSlots = std::log2(slots);
@@ -845,6 +1073,8 @@ std::vector<int32_t> GetCollapsedFFTParams(uint32_t slots, uint32_t levelBudget,
             int32_t(numRotationsRem), bRem,           gRem};
 }
 
+
+
 uint32_t getRatioBSGSLT(uint32_t slots) {  // returns powers of two
     if (slots <= 1) {
         return 1;
@@ -852,6 +1082,8 @@ uint32_t getRatioBSGSLT(uint32_t slots) {  // returns powers of two
     // return (1 << (static_cast<uint32_t>(std::log2(ceil(sqrt(slots))))));
     return (1 << (static_cast<uint32_t>(std::log2(std::ceil(sqrt(slots))) + 1)));
 }
+
+
 
 std::vector<int32_t> FindLTRotationIndicesSwitch(uint32_t dim1, uint32_t m, uint32_t blockDimension) {
     uint32_t slots;
@@ -882,6 +1114,8 @@ std::vector<int32_t> FindLTRotationIndicesSwitch(uint32_t dim1, uint32_t m, uint
 
     return indexList;
 }
+
+
 
 std::vector<int32_t> FindLTRotationIndicesSwitchArgmin(uint32_t m, uint32_t blockDimension, uint32_t cols) {
     uint32_t slots;

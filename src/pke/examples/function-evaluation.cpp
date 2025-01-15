@@ -158,7 +158,7 @@ void EvalFunctionExample() {
     double upperBound = 10;
 
     // We can input any lambda function, which inputs a double and returns a double.
-    auto result = cc->EvalChebyshevFunction([](double x) -> double { return std::sqrt(x); }, ciphertext, lowerBound,
+    auto result = cc->EvalChebyshevFunction(std::function<double(double)>([](double x) -> double { return std::sqrt(x); }), ciphertext, lowerBound,
                                             upperBound, polyDegree);
 
     Plaintext plaintextDec;

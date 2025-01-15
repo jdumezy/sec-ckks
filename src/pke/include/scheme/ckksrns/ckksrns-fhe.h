@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -39,6 +46,7 @@
 #include "utils/caller_info.h"
 #include "math/hal/basicint.h"
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -143,7 +151,10 @@ public:
 
     void EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
                             std::vector<uint32_t> dim1, uint32_t slots, uint32_t correctionFactor,
-                            bool precompute) override;
+                            bool precompute, bool stcFirst, bool functional) override;
+
+    void EvalFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
+                                std::vector<uint32_t> dim1, uint32_t numSlots) override;
 
     std::shared_ptr<std::map<usint, EvalKey<DCRTPoly>>> EvalBootstrapKeyGen(const PrivateKey<DCRTPoly> privateKey,
                                                                             uint32_t slots) override;
@@ -152,6 +163,11 @@ public:
 
     Ciphertext<DCRTPoly> EvalBootstrap(ConstCiphertext<DCRTPoly> ciphertext, uint32_t numIterations,
                                        uint32_t precision) const override;
+
+    Ciphertext<DCRTPoly> EvalStCFirstBootstrap(ConstCiphertext<DCRTPoly> ciphertext) const override;
+
+    Ciphertext<DCRTPoly> EvalFuncBootstrap(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
+                                           int num_poi, int order) const override;
 
     //------------------------------------------------------------------------------
     // Find Rotation Indices
@@ -282,10 +298,13 @@ private:
 
     const uint32_t K_SPARSE  = 28;   // upper bound for the number of overflows in the sparse secret case
     const uint32_t K_UNIFORM = 512;  // upper bound for the number of overflows in the uniform secret case
+    const uint32_t K_FUNC = 16;
     static const uint32_t R_UNIFORM =
         6;  // number of double-angle iterations in CKKS bootstrapping. Must be static because it is used in a static function.
     static const uint32_t R_SPARSE =
         3;  // number of double-angle iterations in CKKS bootstrapping. Must be static because it is used in a static function.
+    static const uint32_t R_FUNC = 
+        4; // number of double-angle iterations in CKKS functional bootstrapping
     uint32_t m_correctionFactor = 0;  // correction factor, which we scale the message by to improve precision
 
     // key tuple is dim1, levelBudgetEnc, levelBudgetDec

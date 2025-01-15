@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -52,6 +59,14 @@ struct longDiv {
     longDiv(const std::vector<double>& q0, const std::vector<double>& r0) : q(q0), r(r0) {}
 };
 
+struct longDivComplex {
+    std::vector<std::complex<double>> q;
+    std::vector<std::complex<double>> r;
+
+    longDivComplex() {}
+    longDivComplex(const std::vector<std::complex<double>>& q0, const std::vector<std::complex<double>>& r0) : q(q0), r(r0) {}
+};
+
 /**
  * @brief Gets the degree of a polynomial specified by its coefficients, which is the index of
  * the last non-zero element in the coefficients. If all the coefficients are zero, it returns 0.
@@ -59,6 +74,7 @@ struct longDiv {
  * @return the integer degree of the polynomial.
  */
 uint32_t Degree(const std::vector<double>& coefficients);
+uint32_t Degree(const std::vector<std::complex<double>>& coefficients);
 
 /**
  * Computes the quotient and remainder of the long division of two polynomials in the power series basis.
@@ -68,6 +84,9 @@ uint32_t Degree(const std::vector<double>& coefficients);
  * @return a struct with the coefficients for the quotient and remainder.
  */
 std::shared_ptr<longDiv> LongDivisionPoly(const std::vector<double>& f, const std::vector<double>& g);
+std::shared_ptr<longDivComplex> LongDivisionPoly(const std::vector<std::complex<double>>& f, const std::vector<double>& g);
+std::shared_ptr<longDivComplex> LongDivisionPoly(const std::vector<double>& f, const std::vector<std::complex<double>>& g);
+std::shared_ptr<longDivComplex> LongDivisionPoly(const std::vector<std::complex<double>>& f, const std::vector<std::complex<double>>& g);
 
 /**
  * Computes the quotient and remainder of the long division of two polynomials in the Chebyshev series basis
@@ -77,6 +96,9 @@ std::shared_ptr<longDiv> LongDivisionPoly(const std::vector<double>& f, const st
  * @return a struct with the coefficients for the quotient and remainder.
  */
 std::shared_ptr<longDiv> LongDivisionChebyshev(const std::vector<double>& f, const std::vector<double>& g);
+std::shared_ptr<longDivComplex> LongDivisionChebyshev(const std::vector<std::complex<double>>& f, const std::vector<double>& g);
+std::shared_ptr<longDivComplex> LongDivisionChebyshev(const std::vector<double>& f, const std::vector<std::complex<double>>& g);
+std::shared_ptr<longDivComplex> LongDivisionChebyshev(const std::vector<std::complex<double>>& f, const std::vector<std::complex<double>>& g);
 
 /**
  * Computes the values of the internal degrees k and m needed in the Paterson-Stockmeyer algorithm

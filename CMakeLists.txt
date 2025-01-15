@@ -33,6 +33,13 @@ set(OPENFHE_VERSION ${OPENFHE_VERSION_MAJOR}.${OPENFHE_VERSION_MINOR}.${OPENFHE_
 set(CMAKE_CXX_STANDARD 17)
 set(CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(BUILD_UNITTESTS ON)
+set(BUILD_EXAMPLES ON)
+set(BUILD_BENCHMARKS ON)
+set(BUILD_EXTRAS ON)
+
+
 #--------------------------------------------------------------------
 # Build options
 #--------------------------------------------------------------------

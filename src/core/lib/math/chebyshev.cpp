@@ -1,8 +1,14 @@
-
 //==================================================================================
 // BSD 2-Clause License
 //
-// Copyright (c) 2014-2023, NJIT, Duality Technologies Inc. and other contributors
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
+// Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
 //
@@ -64,6 +70,33 @@ std::vector<double> EvalChebyshevCoefficients(std::function<double(double)> func
             coefficients[i] += functionPoints[j] * std::cos(PiByDeg * i * (j + 0.5));
         coefficients[i] *= multFactor;
     }
+
+    return coefficients;
+}
+
+std::vector<std::complex<double>> EvalChebyshevCoefficients(std::function<std::complex<double>(double)> func, double a, double b, uint32_t degree) {
+    if (!degree) {
+        OPENFHE_THROW("The degree of approximation can not be zero");
+    }
+
+    size_t coeffTotal = degree + 1;
+    double bMinusA = 0.5 * (b - a);
+    double bPlusA = 0.5 * (b + a);
+    double PiByDeg = M_PI / static_cast<double>(coeffTotal);
+    std::vector<std::complex<double>> functionPoints(coeffTotal);
+    for (size_t i = 0; i < coeffTotal; ++i) {
+        functionPoints[i] = func(std::cos(PiByDeg * (i + 0.5)) * bMinusA + bPlusA);
+    }
+
+    double multFactor = 2.0 / static_cast<double>(coeffTotal);
+    std::vector<std::complex<double>> coefficients(coeffTotal, std::complex<double>(0.0, 0.0));
+    for (size_t i = 0; i < coeffTotal; ++i) {
+        for (size_t j = 0; j < coeffTotal; ++j) {
+            coefficients[i] += functionPoints[j] * std::cos(PiByDeg * i * (j + 0.5));
+        }
+        coefficients[i] *= multFactor;
+    }
+
     return coefficients;
 }
 

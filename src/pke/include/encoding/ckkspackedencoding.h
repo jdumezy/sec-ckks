@@ -1,6 +1,13 @@
 //==================================================================================
 // BSD 2-Clause License
 //
+// This file has been modified from the original version.
+// Changes made by Jules Dumezy at CEA-List in 2025.
+//
+// Copyright (c) 2025, CEA-List
+//
+// Author TPOC: jules.dumezy@cea.fr
+//
 // Copyright (c) 2014-2022, NJIT, Duality Technologies Inc. and other contributors
 //
 // All rights reserved.
@@ -235,23 +242,38 @@ public:
     void PrintValue(std::ostream& out) const override {
         // for sanity's sake, trailing zeros get elided into "..."
         // out.precision(15);
-        out << "(";
+        out << "[";
         size_t i = value.size();
         while (--i > 0)
             if (value[i] != std::complex<double>(0, 0))
                 break;
 
         for (size_t j = 0; j <= i; j++) {
-            out << value[j].real() << ", ";
+            /*out << value[j].real() << ", ";*/
+            /*out << " (" << value[j].real() << "," << value[j].imag() << "),";*/
+            double real_part = value[j].real();
+            double imag_part = value[j].imag();
+            
+            if (std::abs(real_part) < 1e-6) {
+                out << " (0. + "; // Display "e" for very small real part
+            } else {
+                out << " (" << real_part << " + ";
+            }
+
+            if (std::abs(imag_part) < 1e-6) {
+                out << "0.i),"; // Display "e" for very small imaginary part
+            } else {
+                out << imag_part << "i),";
+            }
         }
 
-        out << " ... ); ";
-        out << "Estimated precision: " << encodingParams->GetPlaintextModulus() - m_logError << " bits" << std::endl;
+        out << " ... ] ";
+        /*out << "Estimated precision: " << encodingParams->GetPlaintextModulus() - m_logError << " bits" << std::endl;*/
     }
 
     std::string GetFormattedValues(int64_t precision) const override {
         std::stringstream ss;
-        ss << "(";
+        ss << "[";
 
         // for sanity's sake: get rid of all trailing zeroes and print "..." instead
         size_t i       = value.size();
@@ -266,9 +288,10 @@ public:
 
         if (allZeroes == false) {
             for (size_t j = 0; j <= i; ++j)
-                ss << std::setprecision(precision) << value[j].real() << ", ";
+                ss << std::setprecision(precision) << " [" << value[j].real() << "," << value[j].imag() << "],";
         }
-        ss << "... ); Estimated precision: " << GetLogPrecision() << " bits";
+        /*ss << "... ]; Estimated precision: " << GetLogPrecision() << " bits";*/
+        ss << "... ]";
 
         return ss.str();
     }
