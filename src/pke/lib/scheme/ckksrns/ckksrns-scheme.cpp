@@ -33,6 +33,7 @@
 CKKS implementation. See https://eprint.iacr.org/2020/1118 for details.
  */
 
+#include <memory>
 #define PROFILE
 
 #include "scheme/ckksrns/ckksrns-scheme.h"
@@ -71,6 +72,9 @@ void SchemeCKKSRNS::Enable(PKESchemeFeature feature) {
         case SCHEMESWITCH:
             if (m_SchemeSwitch == nullptr)
                 m_SchemeSwitch = std::make_shared<SWITCHCKKSRNS>();
+            break;
+        case FBTS:
+            m_Fbts = true;
             break;
         default:
             std::stringstream ss;

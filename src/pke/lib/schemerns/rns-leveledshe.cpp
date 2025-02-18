@@ -241,6 +241,7 @@ void LeveledSHERNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, ConstPlain
         EvalMultCoreInPlace(ciphertext, plaintext->GetElement<DCRTPoly>());
     }
     else {
+
         auto ctmorphed = MorphPlaintext(plaintext, ciphertext);
         AdjustForMultInPlace(ciphertext, ctmorphed);
         EvalMultCoreInPlace(ciphertext, ctmorphed->GetElements()[0]);
@@ -248,6 +249,7 @@ void LeveledSHERNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, ConstPlain
         ciphertext->SetNoiseScaleDeg(ciphertext->GetNoiseScaleDeg() + ctmorphed->GetNoiseScaleDeg());
         // TODO (Andrey) : This part is only used in CKKS scheme
         ciphertext->SetScalingFactor(ciphertext->GetScalingFactor() * ctmorphed->GetScalingFactor());
+
         // TODO (Andrey) : This part is only used in BGV scheme
         if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO ||
             cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT) {
@@ -256,6 +258,7 @@ void LeveledSHERNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, ConstPlain
                 ciphertext->GetScalingFactorInt().ModMul(ctmorphed->GetScalingFactorInt(), plainMod));
         }
     }
+
 }
 
 Ciphertext<DCRTPoly> LeveledSHERNS::EvalMultMutable(Ciphertext<DCRTPoly>& ciphertext, Plaintext plaintext) const {

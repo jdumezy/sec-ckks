@@ -504,7 +504,7 @@ DecryptResult CryptoContextImpl<Element>::Decrypt(ConstCiphertext<Element> ciphe
         const auto cryptoParamsCKKS = std::dynamic_pointer_cast<CryptoParametersRNS>(this->GetCryptoParameters());
 
         decryptedCKKS->Decode(ciphertext->GetNoiseScaleDeg(), ciphertext->GetScalingFactor(),
-                              cryptoParamsCKKS->GetScalingTechnique(), cryptoParamsCKKS->GetExecutionMode());
+                              cryptoParamsCKKS->GetScalingTechnique(), cryptoParamsCKKS->GetExecutionMode(), this->GetFbts());
     }
     else {
         decrypted->Decode();
@@ -590,6 +590,26 @@ Ciphertext<Element> CryptoContextImpl<Element>::EvalHermiteFunction(std::functio
   return EvalPoly(ciphertext, coefficients);
 }
 
+template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalHermitePrecomLinearFunction(std::function<double(double)> func,
+                                                                                std::vector<Ciphertext<Element>> powers,
+                                                                                int p) const {
+  auto coefficients = hermiteInterpOrder1Coeff(func, p);
+
+  return EvalPolyLinear(powers, coefficients);
+}
+
+template <typename Element>
+Ciphertext<Element> CryptoContextImpl<Element>::EvalHermitePrecomPSFunction(std::function<double(double)> func,
+                                                                            std::vector<Ciphertext<Element>> powers,
+                                                                            std::vector<Ciphertext<Element>> powers2,
+                                                                            Ciphertext<Element> power2km1,
+                                                                            int p) const {
+  auto coefficients = hermiteInterpOrder1Coeff(func, p);
+
+  return EvalPolyPS(powers, powers2, power2km1, coefficients);
+}
+
 
 }  // namespace lbcrypto
 
@@ -650,7 +670,7 @@ DecryptResult CryptoContextImpl<DCRTPoly>::Decrypt(ConstCiphertext<DCRTPoly> cip
         const auto cryptoParamsCKKS = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(this->GetCryptoParameters());
 
         decryptedCKKS->Decode(ciphertext->GetNoiseScaleDeg(), ciphertext->GetScalingFactor(),
-                              cryptoParamsCKKS->GetScalingTechnique(), cryptoParamsCKKS->GetExecutionMode());
+                              cryptoParamsCKKS->GetScalingTechnique(), cryptoParamsCKKS->GetExecutionMode(), this->GetFbts());
     }
     else {
         decrypted->Decode();
@@ -697,7 +717,7 @@ DecryptResult CryptoContextImpl<DCRTPoly>::MultipartyDecryptFusion(
         decryptedCKKS->SetSlots(partialCiphertextVec[0]->GetSlots());
         const auto cryptoParamsCKKS = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(this->GetCryptoParameters());
         decryptedCKKS->Decode(partialCiphertextVec[0]->GetNoiseScaleDeg(), partialCiphertextVec[0]->GetScalingFactor(),
-                              cryptoParamsCKKS->GetScalingTechnique(), cryptoParamsCKKS->GetExecutionMode());
+                              cryptoParamsCKKS->GetScalingTechnique(), cryptoParamsCKKS->GetExecutionMode(), this->GetFbts());
     }
     else {
         decrypted->Decode();

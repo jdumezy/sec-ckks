@@ -42,6 +42,7 @@ CKKS implementation. See https://eprint.iacr.org/2020/1118 for details.
 
 #include "ciphertext-fwd.h"
 #include "lattice/hal/lat-backend.h"
+#include "utils/exception.h"
 #define PROFILE
 
 #include "cryptocontext.h"
@@ -202,13 +203,13 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPoly(ConstCiphertext<DCRTPoly> x,
 
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPoly(ConstCiphertext<DCRTPoly> x,
                                                   const std::vector<std::complex<double>>& coefficients) const {
-    /*uint32_t n = Degree(coefficients);*/
-    /**/
-    /*if (n < 5) {*/
-        return EvalPolyLinear(x, coefficients);
-    /*}*/
-    /**/
-    /*return EvalPolyPS(x, coefficients);*/
+    uint32_t n = Degree(coefficients);
+
+    if (4 < n  && n < 17) {
+        return EvalPolyPS(x, coefficients);
+    }
+
+    return EvalPolyLinear(x, coefficients);
 }
 
 
@@ -396,6 +397,95 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyLinear(ConstCiphertext<DCRTPoly
 
 
 
+std::vector<Ciphertext<DCRTPoly>> AdvancedSHECKKSRNS::ComputePowersLinear(ConstCiphertext<DCRTPoly> x, size_t k) const {
+    std::vector<Ciphertext<DCRTPoly>> powers(k);
+    powers[0] = x->Clone();
+    auto cc   = x->GetCryptoContext();
+
+    for (size_t i = 2; i <= k; i++) {
+        if (!(i & (i - 1))) {
+            powers[i - 1] = cc->EvalMult(powers[i / 2 - 1], powers[i / 2 - 1]);
+            cc->ModReduceInPlace(powers[i - 1]);
+        }
+        else {
+            int64_t powerOf2 = 1 << (int64_t)std::floor(std::log2(i));
+            int64_t rem      = i % powerOf2;
+            usint levelDiff  = powers[powerOf2 - 1]->GetLevel() - powers[rem - 1]->GetLevel();
+            cc->LevelReduceInPlace(powers[rem - 1], nullptr, levelDiff);
+
+            powers[i - 1] = cc->EvalMult(powers[powerOf2 - 1], powers[rem - 1]);
+            cc->ModReduceInPlace(powers[i - 1]);
+        }
+    }
+
+    for (size_t i = 1; i < k; i++) {
+        usint levelDiff = powers[k - 1]->GetLevel() - powers[i - 1]->GetLevel();
+        cc->LevelReduceInPlace(powers[i - 1], nullptr, levelDiff);
+    }
+
+    return powers;
+}
+
+
+
+Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyLinear(std::vector<Ciphertext<DCRTPoly>> powers,
+                                                        const std::vector<std::complex<double>>& coefficients) const {
+    const size_t coefficientsSize = coefficients.size();
+    if (coefficientsSize == 0) {
+        OPENFHE_THROW("The coefficients vector can not be empty");
+    }
+
+    uint32_t k = coefficientsSize - 1;
+    if (k == 0) {
+        OPENFHE_THROW("The coefficients vector should have, at least, 2 elements");
+    }
+
+    if (coefficients[k] == std::complex<double>(0.0, 0.0))
+        OPENFHE_THROW("EvalPolyLinear: The highest-order coefficient cannot be set to 0.");
+
+    std::vector<int32_t> indices(k, 0);
+    for (size_t i = k; i > 0; i--) {
+        if (!(i & (i - 1))) {
+            indices[i - 1] = 1;
+        }
+        else {
+            if (coefficients[i] != std::complex<double>(0.0, 0.0)) {
+                indices[i - 1]   = 1;
+                int64_t powerOf2 = 1 << (int64_t)std::floor(std::log2(i));
+                int64_t rem      = i % powerOf2;
+                if (indices[rem - 1] == 0)
+                    indices[rem - 1] = 1;
+
+                while ((rem & (rem - 1))) {
+                    powerOf2 = 1 << (int64_t)std::floor(std::log2(rem));
+                    rem      = rem % powerOf2;
+                    if (indices[rem - 1] == 0)
+                        indices[rem - 1] = 1;
+                }
+            }
+        }
+    }
+
+    auto cc   = powers[0]->GetCryptoContext();
+
+    auto result = cc->EvalMult(powers[k - 1], coefficients[k]);
+
+    for (size_t i = 0; i < k - 1; i++) {
+        if (coefficients[i + 1] != std::complex<double>(0.0, 0.0)) {
+            cc->EvalMultInPlace(powers[i], coefficients[i + 1]);
+            cc->EvalAddInPlace(result, powers[i]);
+        }
+    }
+
+    cc->ModReduceInPlace(result);
+
+    cc->EvalAddInPlace(result, coefficients[0]);
+
+    return result;
+}
+
+
+
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::InnerEvalPolyPS(ConstCiphertext<DCRTPoly> x,
                                                          const std::vector<double>& coefficients, uint32_t k,
                                                          uint32_t m, std::vector<Ciphertext<DCRTPoly>>& powers,
@@ -550,7 +640,6 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::InnerEvalPolyPS(ConstCiphertext<DCRTPol
                                                          const std::vector<std::complex<double>>& coefficients, uint32_t k,
                                                          uint32_t m, std::vector<Ciphertext<DCRTPoly>>& powers,
                                                          std::vector<Ciphertext<DCRTPoly>>& powers2) const {
-    std::cout << "\t[OpenFHE] InnerEvalPolyPS (complex) called" << std::endl;
     auto cc = x->GetCryptoContext();
 
     uint32_t k2m2k = k * (1 << (m - 1)) - k;
@@ -1117,6 +1206,237 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyPS(ConstCiphertext<DCRTPoly> x,
     else {
         if (ds > k) {
             su = InnerEvalPolyPS(x, s2, k, m - 1, powers, powers2);
+        }
+        else {
+            auto scopy = s2;
+            scopy.resize(k);
+            if (Degree(scopy) > 0) {
+                std::vector<Ciphertext<DCRTPoly>> ctxs(Degree(scopy));
+                std::vector<std::complex<double>> weights(Degree(scopy));
+
+                for (uint32_t i = 0; i < Degree(scopy); i++) {
+                    ctxs[i]    = powers[i];
+                    weights[i] = s2[i + 1];
+                }
+                
+                su = cc->EvalLinearWSumMutable(ctxs, weights);
+                cc->EvalAddInPlace(su, powers[k - 1]);
+            }
+            else {
+                su = powers[k - 1]->Clone();
+            }
+            cc->EvalAddInPlace(su, s2.front());
+        }
+    }
+
+    Ciphertext<DCRTPoly> result;
+
+    if (flag_c) {
+        result = cc->EvalAdd(powers2[m - 1], cu);
+    }
+    else {
+        result = cc->EvalAdd(powers2[m - 1], divcs->q.front());
+    }
+
+    result = cc->EvalMult(result, qu);
+    cc->ModReduceInPlace(result);
+    cc->EvalAddInPlace(result, su);
+    cc->EvalSubInPlace(result, power2km1);
+
+    return result;
+}
+
+
+
+std::vector<std::vector<Ciphertext<DCRTPoly>>> AdvancedSHECKKSRNS::ComputePowersPS(ConstCiphertext<DCRTPoly> x, size_t n) const {
+    std::vector<uint32_t> degs = ComputeDegreesPS(n);
+    uint32_t k                 = degs[0];
+    uint32_t m                 = degs[1];
+
+    std::vector<Ciphertext<DCRTPoly>> powers(k);
+    powers[0] = x->Clone();
+    auto cc   = x->GetCryptoContext();
+
+    for (size_t i = 2; i <= k; i++) {
+        if (!(i & (i - 1))) {
+            powers[i - 1] = cc->EvalSquare(powers[i / 2 - 1]);
+            cc->ModReduceInPlace(powers[i - 1]);
+        }
+        else {
+            int64_t powerOf2 = 1 << (int64_t)std::floor(std::log2(i));
+            int64_t rem      = i % powerOf2;
+            usint levelDiff  = powers[powerOf2 - 1]->GetLevel() - powers[rem - 1]->GetLevel();
+            cc->LevelReduceInPlace(powers[rem - 1], nullptr, levelDiff);
+            powers[i - 1] = cc->EvalMult(powers[powerOf2 - 1], powers[rem - 1]);
+            cc->ModReduceInPlace(powers[i - 1]);
+        }
+    }
+
+    // adjust levels
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(powers[k - 1]->GetCryptoParameters());
+    auto algo = cc->GetScheme();
+    if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+        for (size_t i = 1; i < k; i++) {
+            usint levelDiff = powers[k - 1]->GetLevel() - powers[i - 1]->GetLevel();
+            cc->LevelReduceInPlace(powers[i - 1], nullptr, levelDiff);
+        }
+    }
+    else {
+        for (size_t i = 1; i < k; i++) {
+            algo->AdjustLevelsAndDepthInPlace(powers[i - 1], powers[k - 1]);
+        }
+    }
+
+    std::vector<Ciphertext<DCRTPoly>> powers2(m);
+
+    powers2.front() = powers.back()->Clone();
+    for (uint32_t i = 1; i < m; i++) {
+        powers2[i] = cc->EvalSquare(powers2[i - 1]);
+        cc->ModReduceInPlace(powers2[i]);
+    }
+
+    auto power2km1 = powers2.front()->Clone();
+    for (uint32_t i = 1; i < m; i++) {
+        power2km1 = cc->EvalMult(power2km1, powers2[i]);
+        cc->ModReduceInPlace(power2km1);
+    }
+
+    return {powers, powers2, {power2km1}};
+}
+
+
+
+Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyPS(std::vector<Ciphertext<DCRTPoly>> powers,
+                                                    std::vector<Ciphertext<DCRTPoly>> powers2,
+                                                    Ciphertext<DCRTPoly> power2km1,
+                                                    const std::vector<std::complex<double>>& coefficients) const {
+    uint32_t n = Degree(coefficients);
+
+    std::vector<std::complex<double>> f2 = coefficients;
+
+    if (coefficients[coefficients.size() - 1] == std::complex<double>(0.0, 0.0))
+        f2.resize(n + 1);
+
+    std::vector<uint32_t> degs = ComputeDegreesPS(n);
+    /* Compute positive integers k,m such that n < k(2^m-1), k is close to sqrt(n/2)	and the depth = ceil(log2(k))+m is minimized */
+    uint32_t k                 = degs[0];
+    uint32_t m                 = degs[1];
+
+    // needed x^k
+    std::vector<int32_t> indices(k, 0);
+    for (size_t i = k; i > 0; i--) {
+        if (!(i & (i - 1))) {
+            indices[i - 1] = 1;
+        }
+        else {
+            indices[i - 1]   = 1;
+            int64_t powerOf2 = 1 << (int64_t)std::floor(std::log2(i));
+            int64_t rem      = i % powerOf2;
+            if (indices[rem - 1] == 0)
+                indices[rem - 1] = 1;
+
+            while ((rem & (rem - 1))) {
+                powerOf2 = 1 << (int64_t)std::floor(std::log2(rem));
+                rem      = rem % powerOf2;
+                if (indices[rem - 1] == 0)
+                    indices[rem - 1] = 1;
+            }
+        }
+    }
+
+    auto cc   = powers[0]->GetCryptoContext();
+
+    uint32_t k2m2k = k * (1 << (m - 1)) - k;
+
+    f2.resize(2 * k2m2k + k + 1, std::complex<double>(0.0, 0.0));
+    f2.back() = 1;
+
+    std::vector<double> xkm(int32_t(k2m2k + k) + 1, 0.0);
+    xkm.back() = 1;
+    auto divqr = LongDivisionPoly(f2, xkm);
+
+    std::vector<std::complex<double>> r2 = divqr->r;
+    if (int32_t(k2m2k - Degree(divqr->r)) <= 0) {
+        r2[int32_t(k2m2k)] -= 1;
+        r2.resize(Degree(r2) + 1);
+    }
+    else {
+        r2.resize(int32_t(k2m2k + 1), std::complex<double>(0.0, 0.0));
+        r2.back() = -1;
+    }
+
+    auto divcs = LongDivisionPoly(r2, divqr->q);
+
+    std::vector<std::complex<double>> s2 = divcs->r;
+    s2.resize(int32_t(k2m2k + 1), std::complex<double>(0.0, 0.0));
+    s2.back() = 1;
+
+    Ciphertext<DCRTPoly> cu;
+    uint32_t dc = Degree(divcs->q);
+    bool flag_c = false;
+
+    if (dc >= 1) {
+        if (dc == 1) {
+            if (divcs->q[1].real() != 1 || divcs->q[1].imag() != 0) {
+                cu = cc->EvalMult(powers.front(), divcs->q[1]);
+                cc->ModReduceInPlace(cu);
+            }
+            else {
+                cu = powers.front()->Clone();
+            }
+        }
+        else {
+            std::vector<Ciphertext<DCRTPoly>> ctxs(dc);
+            std::vector<std::complex<double>> weights(dc);
+
+            for (uint32_t i = 0; i < dc; i++) {
+                ctxs[i]    = powers[i];
+                weights[i] = divcs->q[i + 1];
+            }
+            cu = cc->EvalLinearWSumMutable(ctxs, weights);
+        }
+
+        cc->EvalAddInPlace(cu, divcs->q.front());
+        flag_c = true;
+    }
+
+    Ciphertext<DCRTPoly> qu;
+
+    if (Degree(divqr->q) > k) {
+        /*qu = InnerEvalPolyPS(x, divqr->q, k, m - 1, powers, powers2);*/
+        OPENFHE_THROW("High degree PS evaluation not implemented");
+    }
+    else {
+        auto qcopy = divqr->q;
+        qcopy.resize(k);
+        if (Degree(qcopy) > 0) {
+            std::vector<Ciphertext<DCRTPoly>> ctxs(Degree(qcopy));
+            std::vector<std::complex<double>> weights(Degree(qcopy));
+
+            for (uint32_t i = 0; i < Degree(qcopy); i++) {
+                ctxs[i]    = powers[i];
+                weights[i] = divqr->q[i + 1];
+            }
+
+            qu = cc->EvalLinearWSumMutable(ctxs, weights);
+            cc->EvalAddInPlace(qu, powers[k - 1]);
+        }
+        else {
+            qu = powers[k - 1]->Clone();
+        }
+        cc->EvalAddInPlace(qu, divqr->q.front());
+    }
+
+    uint32_t ds = Degree(s2);
+    Ciphertext<DCRTPoly> su;
+
+    if (std::equal(s2.begin(), s2.end(), divqr->q.begin())) {
+        su = qu->Clone();
+    }
+    else {
+        if (ds > k) {
+            /*su = InnerEvalPolyPS(x, s2, k, m - 1, powers, powers2);*/
+            OPENFHE_THROW("High degree PS evaluation not implemented");
         }
         else {
             auto scopy = s2;

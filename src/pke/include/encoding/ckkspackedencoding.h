@@ -154,7 +154,7 @@ public:
         OPENFHE_THROW("CKKSPackedEncoding::Decode() is not implemented. Use CKKSPackedEncoding::Decode(...) instead.");
     }
 
-    bool Decode(size_t depth, double scalingFactor, ScalingTechnique scalTech, ExecutionMode executionMode);
+    bool Decode(size_t depth, double scalingFactor, ScalingTechnique scalTech, ExecutionMode executionMode, bool fbts);
 
     const std::vector<std::complex<double>>& GetCKKSPackedValue() const override {
         return value;

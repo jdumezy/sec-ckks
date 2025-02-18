@@ -193,11 +193,27 @@ public:
         OPENFHE_THROW("EvalPolyLinear is not supported for the scheme.");
     }
 
+    virtual std::vector<Ciphertext<Element>> ComputePowersLinear(ConstCiphertext<Element> x, size_t k) const {
+        OPENFHE_THROW("EvalPolyPS is not supported for the scheme.");
+    }
+
+    virtual Ciphertext<Element> EvalPolyLinear(std::vector<Ciphertext<Element>> powers, const std::vector<std::complex<double>>& coefficients) const {
+        OPENFHE_THROW("EvalPolyLinear is not supported for the scheme.");
+    }
+
     virtual Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> x, const std::vector<double>& coefficients) const {
         OPENFHE_THROW("EvalPolyPS is not supported for the scheme.");
     }
 
     virtual Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> x, const std::vector<std::complex<double>>& coefficients) const {
+        OPENFHE_THROW("EvalPolyPS is not supported for the scheme.");
+    }
+
+    virtual std::vector<std::vector<Ciphertext<Element>>> ComputePowersPS(ConstCiphertext<Element> x, size_t n) const {
+        OPENFHE_THROW("ComputePowersPS is not supported for the scheme.");
+    }
+
+    virtual Ciphertext<Element> EvalPolyPS(std::vector<Ciphertext<Element>> powers, std::vector<Ciphertext<Element>> powers2, Ciphertext<Element> power2km1, const std::vector<std::complex<double>>& coefficients) const {
         OPENFHE_THROW("EvalPolyPS is not supported for the scheme.");
     }
 

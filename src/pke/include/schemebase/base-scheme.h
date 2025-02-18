@@ -129,6 +129,8 @@ public:
             Enable(FHE);
         if (mask & SCHEMESWITCH)
             Enable(SCHEMESWITCH);
+        if (mask & FBTS)
+            Enable(FBTS);
     }
 
     uint32_t GetEnabled() const {
@@ -149,6 +151,8 @@ public:
             flag |= FHE;
         if (m_SchemeSwitch != nullptr)
             flag |= SCHEMESWITCH;
+        if (m_Fbts)
+            flag |= FBTS;
         return flag;
     }
 
@@ -185,6 +189,9 @@ public:
             case SCHEMESWITCH:
                 if (m_SchemeSwitch != nullptr)
                     return true;
+                break;
+            case FBTS:
+                    return m_Fbts;
                 break;
             default:
                 OPENFHE_THROW("Unknown PKESchemeFeature " + std::to_string(feature));
@@ -1274,6 +1281,20 @@ public:
         return m_AdvancedSHE->EvalPolyLinear(ciphertext, coefficients);
     }
 
+    std::vector<Ciphertext<Element>> ComputePowersLinear(ConstCiphertext<Element> x, size_t k) const {
+        VerifyAdvancedSHEEnabled(__func__);
+        if (!x)
+            OPENFHE_THROW("Input ciphertext is nullptr");
+        return m_AdvancedSHE->ComputePowersLinear(x, k);
+    }
+
+    Ciphertext<Element> EvalPolyLinear(std::vector<Ciphertext<Element>> powers, const std::vector<std::complex<double>>& coefficients) const {
+        VerifyAdvancedSHEEnabled(__func__);
+        if (!powers[0])
+            OPENFHE_THROW("Input ciphertext is nullptr");
+        return m_AdvancedSHE->EvalPolyLinear(powers, coefficients);
+    }
+
     Ciphertext<Element> EvalPolyPS(ConstCiphertext<Element> ciphertext, const std::vector<double>& coefficients) const {
         VerifyAdvancedSHEEnabled(__func__);
         if (!ciphertext)
@@ -1286,6 +1307,20 @@ public:
         if (!ciphertext)
             OPENFHE_THROW("Input ciphertext is nullptr");
         return m_AdvancedSHE->EvalPolyPS(ciphertext, coefficients);
+    }
+
+    std::vector<std::vector<Ciphertext<Element>>> ComputePowersPS(ConstCiphertext<Element> x, size_t n) const {
+        VerifyAdvancedSHEEnabled(__func__);
+        if (!x)
+            OPENFHE_THROW("Input ciphertext is nullptr");
+        return m_AdvancedSHE->ComputePowersPS(x, n);
+    }
+
+    Ciphertext<Element> EvalPolyPS(std::vector<Ciphertext<Element>> powers, std::vector<Ciphertext<Element>> powers2, Ciphertext<Element> power2km1, const std::vector<std::complex<double>>& coefficients) const {
+        VerifyAdvancedSHEEnabled(__func__);
+        if (!powers[0])
+            OPENFHE_THROW("Input ciphertext is nullptr");
+        return m_AdvancedSHE->EvalPolyPS(powers, powers2, power2km1, coefficients);
     }
 
     /////////////////////////////////////
@@ -1544,16 +1579,16 @@ public:
     void EvalBootstrapSetup(const CryptoContextImpl<Element>& cc, const std::vector<uint32_t>& levelBudget = {5, 4},
                             const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0,
                             uint32_t correctionFactor = 0, bool precompute = true, bool stcFirst = false,
-                            bool functional = false) {
+                            bool functional = false, int bits = 0) {
         VerifyFHEEnabled(__func__);
-        m_FHE->EvalBootstrapSetup(cc, levelBudget, dim1, slots, correctionFactor, precompute, stcFirst, functional);
+        m_FHE->EvalBootstrapSetup(cc, levelBudget, dim1, slots, correctionFactor, precompute, stcFirst, functional, bits);
         return;
     }
 
     void EvalFuncBootstrapSetup(const CryptoContextImpl<Element>& cc, const std::vector<uint32_t>& levelBudget = {5, 4},
-                                const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0) {
+                                const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0, int bits = 0) {
         VerifyFHEEnabled(__func__);
-        m_FHE->EvalFuncBootstrapSetup(cc, levelBudget, dim1, slots);
+        m_FHE->EvalFuncBootstrapSetup(cc, levelBudget, dim1, slots, bits);
         return;
     }
 
@@ -1584,6 +1619,18 @@ public:
                                           int num_poi, int order) const {
         VerifyFHEEnabled(__func__);
         return m_FHE->EvalFuncBootstrap(ciphertext, func, num_poi, order);
+    }
+
+    std::vector<Ciphertext<Element>> EvalFuncMVBootstrap(ConstCiphertext<Element> ciphertext, std::vector<std::function<double(double)>> func_vec,
+                                                         int num_poi, int order) const {
+        VerifyFHEEnabled(__func__);
+        return m_FHE->EvalFuncMVBootstrap(ciphertext, func_vec, num_poi, order);
+    }
+
+    Ciphertext<DCRTPoly> EvalFuncSimpleTreeMVB(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
+                                               int num_poi, int order) const {
+        VerifyFHEEnabled(__func__);
+        return m_FHE->EvalFuncSimpleTreeMVB(ciphertext, func, num_poi, order);
     }
 
     // SCHEMESWITCHING methods
@@ -1708,6 +1755,10 @@ public:
     void SetSwkFC(Ciphertext<Element> FHEWtoCKKSswk) {
         VerifySchemeSwitchEnabled(__func__);
         m_SchemeSwitch->SetSwkFC(FHEWtoCKKSswk);
+    }
+
+    bool GetFbts() {
+        return m_Fbts;
     }
 
     template <class Archive>
@@ -1885,6 +1936,7 @@ public:
         out << ", Multiparty " << (s.m_Multiparty == 0 ? "none" : typeid(*s.m_Multiparty).name());
         out << ", FHE " << (s.m_FHE == 0 ? "none" : typeid(*s.m_FHE).name());
         out << ", SchemeSwitch " << (s.m_SchemeSwitch == 0 ? "none" : typeid(*s.m_SchemeSwitch).name());
+        out << ", FunctionalBootstrapping " << (s.m_Fbts);
 
         return out;
     }
@@ -1900,6 +1952,7 @@ protected:
     std::shared_ptr<MultipartyBase<Element>> m_Multiparty;
     std::shared_ptr<FHEBase<Element>> m_FHE;
     std::shared_ptr<FHEBase<Element>> m_SchemeSwitch;
+    bool m_Fbts = false;
 };
 
 }  // namespace lbcrypto

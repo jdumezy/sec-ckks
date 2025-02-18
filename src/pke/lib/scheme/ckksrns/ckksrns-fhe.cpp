@@ -38,6 +38,7 @@
 
 #include "config_core.h"
 #include "constants-defs.h"
+#include "lattice/hal/lat-backend.h"
 #define PROFILE
 
 #include "scheme/ckksrns/ckksrns-fhe.h"
@@ -70,7 +71,7 @@ namespace lbcrypto {
 
 void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
                                     std::vector<uint32_t> dim1, uint32_t numSlots, uint32_t correctionFactor,
-                                    bool precompute, bool stcFirst, bool functional) {
+                                    bool precompute, bool stcFirst, bool functional, int bits) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
 
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
@@ -176,15 +177,18 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         uint128_t factor = ((uint128_t)1 << ((uint32_t)std::round(std::log2(qDouble))));
         double pre       = qDouble / factor;
 
-        double scaleEnc;
+        double scaleEnc, scaleDec;
         if (functional) {
             scaleEnc  = pre / (K_FUNC);
+            if (!bits)
+                OPENFHE_THROW("For functional bootstrapping, bits should be set to at least 1.");
+            scaleDec = 2. / (pre * pow(2, bits));
         }
         else {
             double k  = (cryptoParams->GetSecretKeyDist() == SPARSE_TERNARY) ? K_SPARSE : 1.0;
-            scaleEnc  = pre / k; 
+            scaleEnc  = pre / k;
+            scaleDec = 1 / pre;
         }
-        double scaleDec  = 1 / pre;
 
         // compute # of levels to remain when encoding the coefficients
         uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();
@@ -199,7 +203,7 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
             if (!functional)
                 lDec = precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] + 1; // StC
             else
-                lDec = precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET]; // StC
+                lDec = 1; // StC
         }
         else {
             uint32_t approxModDepth = GetModDepthInternal(cryptoParams->GetSecretKeyDist());
@@ -248,8 +252,8 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
 }
 
 void FHECKKSRNS::EvalFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
-                                       std::vector<uint32_t> dim1, uint32_t numSlots) {
-  EvalBootstrapSetup(cc, levelBudget, dim1, numSlots, 0, true, true, true);
+                                       std::vector<uint32_t> dim1, uint32_t numSlots, int bits) {
+  EvalBootstrapSetup(cc, levelBudget, dim1, numSlots, 0, true, true, true, bits);
 }
 
 std::shared_ptr<std::map<usint, EvalKey<DCRTPoly>>> FHECKKSRNS::EvalBootstrapKeyGen(
@@ -897,8 +901,6 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalStCFirstBootstrap(ConstCiphertext<DCRTPoly>
         double constantEvalMult = pre / N;
         cc->EvalMultInPlace(raised, constantEvalMult);
 
-        std::cout << raised->GetLevel() << std::endl;
-
         //------------------------------------------------------------------------------
         // Running CoeffToSlot
         //------------------------------------------------------------------------------
@@ -959,6 +961,8 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalStCFirstBootstrap(ConstCiphertext<DCRTPoly>
     return result;
 }
 
+
+
 Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncBootstrap(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
                                                    int num_poi, int order) const {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
@@ -976,9 +980,9 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncBootstrap(ConstCiphertext<DCRTPoly> cip
 #ifdef BOOTSTRAPTIMING
     TimeVar t;
     double timeStC(0.0);
+    double timeMR(0.0);
     double timeCtS(0.0);
-    double timeCheb(0.0);
-    double timeHerm(0.0);
+    double timeLUT(0.0);
 #endif
 
     auto cc     = ciphertext->GetCryptoContext();
@@ -1029,7 +1033,285 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncBootstrap(ConstCiphertext<DCRTPoly> cip
 
     Ciphertext<DCRTPoly> result;
 
-    ciphertext = cc->EvalMult(ciphertext, 2./num_poi);
+    bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
+                         (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
+
+    if (slots == M / 4) {
+        //------------------------------------------------------------------------------
+        // FULLY PACKED CASE
+        //------------------------------------------------------------------------------
+
+#ifdef BOOTSTRAPTIMING
+    TIC(t);
+#endif
+
+        //------------------------------------------------------------------------------
+        // Running SlotToCoeff
+        //------------------------------------------------------------------------------
+
+        auto ctxtStC = (isLTBootstrap) ? EvalLinearTransform(precom->m_U0Pre, ciphertext):
+                                         EvalSlotsToCoeffs(precom->m_U0PreFFT, ciphertext);
+
+#ifdef BOOTSTRAPTIMING
+    timeStC = TOC(t);
+    std::cerr << "\nSlotsToCoeffs time: " << timeStC / 1000.0 << " s" << std::endl;
+    TIC(t);
+#endif
+
+        //------------------------------------------------------------------------------
+        // RAISING THE MODULUS
+        //------------------------------------------------------------------------------
+
+        Ciphertext<DCRTPoly> raised = ctxtStC;
+        auto algo                   = cc->GetScheme();
+        algo->ModReduceInternalInPlace(raised, raised->GetNoiseScaleDeg() - 1);
+
+        auto ctxtDCRT = raised->GetElements();
+
+        for (size_t i = 0; i < ctxtDCRT.size(); i++) {
+            DCRTPoly temp(elementParamsRaisedPtr, COEFFICIENT);
+            ctxtDCRT[i].SetFormat(COEFFICIENT);
+            temp = ctxtDCRT[i].GetElementAtIndex(0);
+            temp.SetFormat(EVALUATION);
+            ctxtDCRT[i] = temp;
+        }
+
+        raised->SetLevel(L0 - ctxtDCRT[0].GetNumOfElements());
+        raised->SetElements(std::move(ctxtDCRT));
+
+        double constantEvalMult = pre / N;
+        cc->EvalMultInPlace(raised, constantEvalMult);
+
+#ifdef BOOTSTRAPTIMING
+    timeMR = TOC(t);
+    std::cerr << "\nModRaise time: " << timeMR / 1000.0 << " s" << std::endl;
+    TIC(t);
+#endif
+
+        //------------------------------------------------------------------------------
+        // Running CoeffToSlot
+        //------------------------------------------------------------------------------
+
+        auto ctxtCtS = (isLTBootstrap) ? EvalLinearTransform(precom->m_U0hatTPre, raised):
+                                         EvalCoeffsToSlots(precom->m_U0hatTPreFFT, raised);
+
+        auto evalKeyMap = cc->GetEvalAutomorphismKeyMap(ctxtCtS->GetKeyTag());
+        auto conj       = Conjugate(ctxtCtS, evalKeyMap);
+        Ciphertext<DCRTPoly> ctxtCtSI;
+        
+        bool use_imslots = true;
+        if (use_imslots) {
+            ctxtCtSI = cc->EvalSub(ctxtCtS, conj);
+            algo->MultByMonomialInPlace(ctxtCtSI, 3 * M / 4);
+
+            cc->EvalAddInPlace(ctxtCtS, conj);
+
+            if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+                #pragma omp parallel sections
+                {
+                    #pragma omp section
+                    {
+                        while (ctxtCtS->GetNoiseScaleDeg() > 1) {
+                            cc->ModReduceInPlace(ctxtCtS);
+                        }
+                    }
+                    #pragma omp section
+                    {
+                        while (ctxtCtSI->GetNoiseScaleDeg() > 1) {
+                            cc->ModReduceInPlace(ctxtCtSI);
+                        }
+                    }
+                }
+            }
+            else {
+                #pragma omp parallel sections
+                {
+                    #pragma omp section
+                    {
+                        if (ctxtCtS->GetNoiseScaleDeg() == 2) {
+                            algo->ModReduceInternalInPlace(ctxtCtS, BASE_NUM_LEVELS_TO_DROP);
+                        }
+                    }
+                    #pragma omp section
+                    {
+                        if (ctxtCtSI->GetNoiseScaleDeg() == 2) {
+                            algo->ModReduceInternalInPlace(ctxtCtSI, BASE_NUM_LEVELS_TO_DROP);
+                        }
+                    }
+
+                }
+            }
+        }
+        else {
+            cc->EvalAddInPlace(ctxtCtS, conj);
+
+            if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+                while (ctxtCtS->GetNoiseScaleDeg() > 1) {
+                    cc->ModReduceInPlace(ctxtCtS);
+                }
+            }
+            else {
+                if (ctxtCtS->GetNoiseScaleDeg() == 2) {
+                    algo->ModReduceInternalInPlace(ctxtCtS, BASE_NUM_LEVELS_TO_DROP);
+                }
+            }
+        }
+
+#ifdef BOOTSTRAPTIMING
+    timeCtS = TOC(t);
+    std::cerr << "CoeffsToSlots time: " << timeCtS / 1000.0 << " s" << std::endl;
+    TIC(t);
+#endif
+
+        //------------------------------------------------------------------------------
+        // Running EvalLUT
+        //------------------------------------------------------------------------------
+
+        int K = K_FUNC;
+        int powR = pow(2, R_FUNC);
+        auto f = [K, powR](double x) -> std::complex<double> { return std::exp(std::complex<double>(0, 2 * M_PI * K * x / powR)); };
+
+        if (use_imslots) {
+            Ciphertext<DCRTPoly> ctxtInterp, ctxtInterpI;
+
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    auto ctxtExp = cc->EvalChebyshevFunction(f, ctxtCtS, -1, 1, 16); // 14 low
+                    for (uint32_t i = 0; i < R_FUNC; ++i) {
+                        cc->EvalSquareInPlace(ctxtExp);
+                        cc->ModReduceInPlace(ctxtExp);
+                    }
+
+                    ctxtInterp = cc->EvalHermiteFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtExp, num_poi, order);
+
+                    conj = Conjugate(ctxtInterp, evalKeyMap);
+                    cc->EvalAddInPlace(ctxtInterp, conj);
+                }
+
+                #pragma omp section
+                {
+                    auto ctxtExpI = cc->EvalChebyshevFunction(f, ctxtCtSI, -1, 1, 16);
+                    for (uint32_t i = 0; i < R_FUNC; ++i) {
+                        cc->EvalSquareInPlace(ctxtExpI);
+                        cc->ModReduceInPlace(ctxtExpI);
+                    }
+
+                    ctxtInterpI = cc->EvalHermiteFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtExpI, num_poi, order);
+
+                    conj = Conjugate(ctxtInterpI, evalKeyMap);
+                    cc->EvalAddInPlace(ctxtInterpI, conj);
+
+                    algo->MultByMonomialInPlace(ctxtInterpI, M / 4);
+                }
+            }
+
+            result = cc->EvalAdd(ctxtInterp, ctxtInterpI);
+        }
+        else {
+            auto ctxtExp = cc->EvalChebyshevFunction(f, ctxtCtS, -1, 1, 16); // 14 low
+            for (uint32_t i = 0; i < R_FUNC; ++i) {
+                cc->EvalSquareInPlace(ctxtExp);
+                cc->ModReduceInPlace(ctxtExp);
+            }
+
+            auto ctxtInterp = cc->EvalHermiteFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtExp, num_poi, order);
+
+            conj = Conjugate(ctxtInterp, evalKeyMap);
+            cc->EvalAddInPlace(ctxtInterp, conj);
+
+            result = ctxtInterp;
+        }
+
+#ifdef BOOTSTRAPTIMING
+    timeLUT = TOC(t);
+    std::cerr << "EvalLUT time: " << (timeLUT) / 1000.0 << " s" << std::endl;
+#endif
+
+    }
+    else {
+        OPENFHE_THROW("Sparse packing Functional Bootstrapping not yet implemented.");
+    }
+
+    return result;
+}
+
+
+
+std::vector<Ciphertext<DCRTPoly>> FHECKKSRNS::EvalFuncMVBootstrap(ConstCiphertext<DCRTPoly> ciphertext, std::vector<std::function<double(double)>> func_vec,
+                                                                  int num_poi, int order) const {
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+
+    if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
+        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for the Hybrid key switching method.");
+    if (cryptoParams->GetScalingTechnique() != FIXEDMANUAL)
+        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for FIXEDMANUAL scaling.");
+    if(cryptoParams->GetSecretKeyDist() != SPARSE_TERNARY)
+        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for SPARSE_TERNARY key.");
+#if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
+    OPENFHE_THROW("128-bit CKKS Functional Bootstrapping is not supported for 128 NATIVEINT.");
+#endif
+    if (order != 1) {
+        std::cout << "Setting order back to one as only order 1 currently supported.";
+        order = 1;
+    }
+
+#ifdef BOOTSTRAPTIMING
+    TimeVar t;
+    double timeStC(0.0);
+    double timeCtS(0.0);
+    double timeLUT(0.0);
+#endif
+
+    auto cc     = ciphertext->GetCryptoContext();
+    uint32_t M  = cc->GetCyclotomicOrder();
+    uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();
+
+    uint32_t slots = ciphertext->GetSlots();
+
+    auto pair = m_bootPrecomMap.find(slots);
+    if (pair == m_bootPrecomMap.end()) {
+        std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +
+                             std::string(" slots were not generated") +
+                             std::string(" Need to call EvalBootstrapSetup and then EvalBootstrapKeyGen to proceed"));
+        OPENFHE_THROW(errorMsg);
+    }
+    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;
+    size_t N                                          = cc->GetRingDimension();
+
+    auto elementParamsRaised = *(cryptoParams->GetElementParams());
+
+    auto paramsQ = elementParamsRaised.GetParams();
+    usint sizeQ  = paramsQ.size();
+
+    std::vector<NativeInteger> moduli(sizeQ);
+    std::vector<NativeInteger> roots(sizeQ);
+    for (size_t i = 0; i < sizeQ; i++) {
+        moduli[i] = paramsQ[i]->GetModulus();
+        roots[i]  = paramsQ[i]->GetRootOfUnity();
+    }
+    auto elementParamsRaisedPtr = std::make_shared<ILDCRTParams<DCRTPoly::Integer>>(M, moduli, roots);
+
+    NativeInteger q = elementParamsRaisedPtr->GetParams()[0]->GetModulus().ConvertToInt();
+    double qDouble  = q.ConvertToDouble();
+
+    const auto p = cryptoParams->GetPlaintextModulus();
+    double powP  = pow(2, p);
+
+    int32_t deg = std::round(std::log2(qDouble / powP));
+#if NATIVEINT != 128
+    if (deg > static_cast<int32_t>(m_correctionFactor)) {
+        OPENFHE_THROW("Degree [" + std::to_string(deg) + "] must be less than or equal to the correction factor [" +
+                      std::to_string(m_correctionFactor) + "].");
+    }
+#endif
+    double post         = std::pow(2, static_cast<double>(deg));
+
+    double pre      = 1. / post;
+
+    size_t nb_func = func_vec.size();
+    std::vector<Ciphertext<DCRTPoly>> result(nb_func);
 
     bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
                          (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
@@ -1088,22 +1370,69 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncBootstrap(ConstCiphertext<DCRTPoly> cip
 
         auto evalKeyMap = cc->GetEvalAutomorphismKeyMap(ctxtCtS->GetKeyTag());
         auto conj       = Conjugate(ctxtCtS, evalKeyMap);
-        cc->EvalAddInPlace(ctxtCtS, conj);
+        Ciphertext<DCRTPoly> ctxtCtSI;
+        
+        bool use_imslots = true;
+        if (use_imslots) {
+            ctxtCtSI = cc->EvalSub(ctxtCtS, conj);
+            algo->MultByMonomialInPlace(ctxtCtSI, 3 * M / 4);
 
-        if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
-            while (ctxtCtS->GetNoiseScaleDeg() > 1) {
-                cc->ModReduceInPlace(ctxtCtS);
+            cc->EvalAddInPlace(ctxtCtS, conj);
+
+            if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+                #pragma omp parallel sections
+                {
+                    #pragma omp section
+                    {
+                        while (ctxtCtS->GetNoiseScaleDeg() > 1) {
+                            cc->ModReduceInPlace(ctxtCtS);
+                        }
+                    }
+                    #pragma omp section
+                    {
+                        while (ctxtCtSI->GetNoiseScaleDeg() > 1) {
+                            cc->ModReduceInPlace(ctxtCtSI);
+                        }
+                    }
+                }
+            }
+            else {
+                #pragma omp parallel sections
+                {
+                    #pragma omp section
+                    {
+                        if (ctxtCtS->GetNoiseScaleDeg() == 2) {
+                            algo->ModReduceInternalInPlace(ctxtCtS, BASE_NUM_LEVELS_TO_DROP);
+                        }
+                    }
+                    #pragma omp section
+                    {
+                        if (ctxtCtSI->GetNoiseScaleDeg() == 2) {
+                            algo->ModReduceInternalInPlace(ctxtCtSI, BASE_NUM_LEVELS_TO_DROP);
+                        }
+                    }
+
+                }
             }
         }
         else {
-            if (ctxtCtS->GetNoiseScaleDeg() == 2) {
-                algo->ModReduceInternalInPlace(ctxtCtS, BASE_NUM_LEVELS_TO_DROP);
+            cc->EvalAddInPlace(ctxtCtS, conj);
+
+            if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+                while (ctxtCtS->GetNoiseScaleDeg() > 1) {
+                    cc->ModReduceInPlace(ctxtCtS);
+                }
+            }
+            else {
+                if (ctxtCtS->GetNoiseScaleDeg() == 2) {
+                    algo->ModReduceInternalInPlace(ctxtCtS, BASE_NUM_LEVELS_TO_DROP);
+                }
             }
         }
 
 #ifdef BOOTSTRAPTIMING
     timeCtS = TOC(t);
-    std::cerr << "CoeffsToSlots time: " << timeCtS / 1000.0 << " s" << std::endl;
+    std::cerr << "ModRaise + CoeffsToSlots time: " << timeCtS / 1000.0 << " s" << std::endl;
     TIC(t);
 #endif
 
@@ -1114,29 +1443,125 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncBootstrap(ConstCiphertext<DCRTPoly> cip
         int K = K_FUNC;
         int powR = pow(2, R_FUNC);
         auto f = [K, powR](double x) -> std::complex<double> { return std::exp(std::complex<double>(0, 2 * M_PI * K * x / powR)); };
-        auto ctxtExp = cc->EvalChebyshevFunction(f, ctxtCtS, -1, 1, 16); // 14 low
-        for (uint32_t i = 0; i < R_FUNC; ++i) {
-            cc->EvalSquareInPlace(ctxtExp);
-            cc->ModReduceInPlace(ctxtExp);
+
+        bool use_ps = num_poi > 3 && num_poi < 17;
+
+        if (use_imslots) {
+            std::vector<Ciphertext<DCRTPoly>> ctxtInterp(nb_func), ctxtInterpI(nb_func);
+
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    auto ctxtExp = cc->EvalChebyshevFunction(f, ctxtCtS, -1, 1, 16); // 14 low
+                    for (uint32_t i = 0; i < R_FUNC; ++i) {
+                        cc->EvalSquareInPlace(ctxtExp);
+                        cc->ModReduceInPlace(ctxtExp);
+                    }
+
+                    if (use_ps) {
+                        auto ctxtVecPowersExp = cc->ComputePowersPS(ctxtExp, num_poi - 1);
+                        auto ctxtPowersExp = ctxtVecPowersExp[0];
+                        auto ctxtPowers2Exp = ctxtVecPowersExp[1];
+                        auto ctxtPower2km1Exp = ctxtVecPowersExp[2][0];
+
+                        #pragma omp parallel for
+                        for (size_t i = 0; i < nb_func; ++i) {
+                            auto& func = func_vec[i];
+                            ctxtInterp[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, ctxtPowers2Exp, ctxtPower2km1Exp, num_poi);
+                            conj = Conjugate(ctxtInterp[i], evalKeyMap);
+                            cc->EvalAddInPlace(ctxtInterp[i], conj);
+                        }
+                    }
+                    else {
+                        auto ctxtPowersExp = cc->ComputePowersLinear(ctxtExp, num_poi - 1);
+
+                        #pragma omp parallel for
+                        for (size_t i = 0; i < nb_func; ++i) {
+                            auto& func = func_vec[i];
+                            ctxtInterp[i] = cc->EvalHermitePrecomLinearFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, num_poi);
+                            conj = Conjugate(ctxtInterp[i], evalKeyMap);
+                            cc->EvalAddInPlace(ctxtInterp[i], conj);
+                        }
+                    }
+                }
+
+                #pragma omp section
+                {
+                    auto ctxtExpI = cc->EvalChebyshevFunction(f, ctxtCtSI, -1, 1, 16);
+                    for (uint32_t i = 0; i < R_FUNC; ++i) {
+                        cc->EvalSquareInPlace(ctxtExpI);
+                        cc->ModReduceInPlace(ctxtExpI);
+                    }
+
+                    if (use_ps) {
+                        auto ctxtVecPowersExpI = cc->ComputePowersPS(ctxtExpI, num_poi - 1);
+                        auto ctxtPowersExpI = ctxtVecPowersExpI[0];
+                        auto ctxtPowers2ExpI = ctxtVecPowersExpI[1];
+                        auto ctxtPower2km1ExpI = ctxtVecPowersExpI[2][0];
+
+                        #pragma omp parallel for
+                        for (size_t i = 0; i < nb_func; ++i) {
+                            auto& func = func_vec[i];
+                            ctxtInterpI[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExpI, ctxtPowers2ExpI, ctxtPower2km1ExpI, num_poi);
+                            conj = Conjugate(ctxtInterpI[i], evalKeyMap);
+                            cc->EvalAddInPlace(ctxtInterpI[i], conj);
+
+                            algo->MultByMonomialInPlace(ctxtInterpI[i], M / 4);
+                        }
+                    }
+                    else {
+                        auto ctxtPowersExpI = cc->ComputePowersLinear(ctxtExpI, num_poi - 1);
+
+                        #pragma omp parallel for
+                        for (size_t i = 0; i < nb_func; ++i) {
+                            auto& func = func_vec[i];
+                            ctxtInterpI[i] = cc->EvalHermitePrecomLinearFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExpI, num_poi);
+                            conj = Conjugate(ctxtInterpI[i], evalKeyMap);
+                            cc->EvalAddInPlace(ctxtInterpI[i], conj);
+
+                            algo->MultByMonomialInPlace(ctxtInterpI[i], M / 4);
+                        }
+                    }
+                }
+            }
+
+            #pragma omp parallel for
+            for (size_t i = 0; i < nb_func; ++i) {
+                result[i] = cc->EvalAdd(ctxtInterp[i], ctxtInterpI[i]);
+            }
+        }
+        else {
+            std::vector<Ciphertext<DCRTPoly>> ctxtInterp(nb_func);
+
+            auto ctxtExp = cc->EvalChebyshevFunction(f, ctxtCtS, -1, 1, 16); // 14 low
+            for (uint32_t i = 0; i < R_FUNC; ++i) {
+                cc->EvalSquareInPlace(ctxtExp);
+                cc->ModReduceInPlace(ctxtExp);
+            }
+
+            auto ctxtVecPowersExp = cc->ComputePowersPS(ctxtExp, num_poi - 1);
+            auto ctxtPowersExp = ctxtVecPowersExp[0];
+            auto ctxtPowers2Exp = ctxtVecPowersExp[1];
+            auto ctxtPower2km1Exp = ctxtVecPowersExp[2][0];
+
+            #pragma omp parallel for
+            for (size_t i = 0; i < nb_func; ++i) {
+                auto& func = func_vec[i];
+                ctxtInterp[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, ctxtPowers2Exp, ctxtPower2km1Exp, num_poi);
+                conj = Conjugate(ctxtInterp[i], evalKeyMap);
+                cc->EvalAddInPlace(ctxtInterp[i], conj);
+            }
+
+            #pragma omp parallel for
+            for (size_t i = 0; i < nb_func; ++i) {
+                result[i] = ctxtInterp[i];
+            }
         }
 
 #ifdef BOOTSTRAPTIMING
-    timeCheb = TOC(t);
-    std::cerr << "EvalCheb time: " << timeCheb / 1000.0 << " s" << std::endl;
-    TIC(t);
-#endif
-
-        auto ctxtInterp = cc->EvalHermiteFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtExp, num_poi, order);
-
-        conj = Conjugate(ctxtInterp, evalKeyMap);
-        cc->EvalAddInPlace(ctxtInterp, conj);
-
-        result = ctxtInterp;
-
-#ifdef BOOTSTRAPTIMING
-    timeHerm = TOC(t);
-    std::cerr << "EvalHerm time: " << timeHerm / 1000.0 << " s" << std::endl;
-    std::cerr << "EvalLUT time: " << (timeHerm + timeCheb) / 1000.0 << " s" << std::endl;
+    timeLUT = TOC(t);
+    std::cerr << "EvalLUT time: " << (timeLUT) / 1000.0 << " s" << std::endl;
 #endif
 
     }
@@ -1147,6 +1572,706 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncBootstrap(ConstCiphertext<DCRTPoly> cip
     return result;
 }
 
+// WIP: @jdumezy
+/*std::vector<Ciphertext<DCRTPoly>> FHECKKSRNS::EvalFuncTreeMVB(std::vector<ConstCiphertext<DCRTPoly>> ciphertextVec, std::function<double(double)> func_vec,*/
+/*                                                              int num_poi, int order) const {*/
+/*    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertextVec[0]->GetCryptoParameters());*/
+/**/
+/*    if (cryptoParams->GetKeySwitchTechnique() != HYBRID)*/
+/*        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for the Hybrid key switching method.");*/
+/*    if (cryptoParams->GetScalingTechnique() != FIXEDMANUAL)*/
+/*        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for FIXEDMANUAL scaling.");*/
+/*    if(cryptoParams->GetSecretKeyDist() != SPARSE_TERNARY)*/
+/*        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for SPARSE_TERNARY key.");*/
+/*#if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)*/
+/*    OPENFHE_THROW("128-bit CKKS Functional Bootstrapping is not supported for 128 NATIVEINT.");*/
+/*#endif*/
+/**/
+/*#ifdef BOOTSTRAPTIMING*/
+/*    TimeVar t;*/
+/*    double timeStC(0.0);*/
+/*    double timeCtS(0.0);*/
+/*    double timeLUT(0.0);*/
+/*#endif*/
+/**/
+/*    auto cc     = ciphertextVec[0]->GetCryptoContext();*/
+/*    uint32_t M  = cc->GetCyclotomicOrder();*/
+/*    uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();*/
+/**/
+/*    uint32_t slots = ciphertextVec[0]->GetSlots();*/
+/**/
+/*    auto pair = m_bootPrecomMap.find(slots);*/
+/*    if (pair == m_bootPrecomMap.end()) {*/
+/*        std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +*/
+/*                             std::string(" slots were not generated") +*/
+/*                             std::string(" Need to call EvalBootstrapSetup and then EvalBootstrapKeyGen to proceed"));*/
+/*        OPENFHE_THROW(errorMsg);*/
+/*    }*/
+/*    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;*/
+/*    size_t N                                          = cc->GetRingDimension();*/
+/**/
+/*    auto elementParamsRaised = *(cryptoParams->GetElementParams());*/
+/**/
+/*    auto paramsQ = elementParamsRaised.GetParams();*/
+/*    usint sizeQ  = paramsQ.size();*/
+/**/
+/*    std::vector<NativeInteger> moduli(sizeQ);*/
+/*    std::vector<NativeInteger> roots(sizeQ);*/
+/*    for (size_t i = 0; i < sizeQ; i++) {*/
+/*        moduli[i] = paramsQ[i]->GetModulus();*/
+/*        roots[i]  = paramsQ[i]->GetRootOfUnity();*/
+/*    }*/
+/*    auto elementParamsRaisedPtr = std::make_shared<ILDCRTParams<DCRTPoly::Integer>>(M, moduli, roots);*/
+/**/
+/*    NativeInteger q = elementParamsRaisedPtr->GetParams()[0]->GetModulus().ConvertToInt();*/
+/*    double qDouble  = q.ConvertToDouble();*/
+/**/
+/*    const auto p = cryptoParams->GetPlaintextModulus();*/
+/*    double powP  = pow(2, p);*/
+/**/
+/*    int32_t deg = std::round(std::log2(qDouble / powP));*/
+/*#if NATIVEINT != 128*/
+/*    if (deg > static_cast<int32_t>(m_correctionFactor)) {*/
+/*        OPENFHE_THROW("Degree [" + std::to_string(deg) + "] must be less than or equal to the correction factor [" +*/
+/*                      std::to_string(m_correctionFactor) + "].");*/
+/*    }*/
+/*#endif*/
+/*    double post         = std::pow(2, static_cast<double>(deg));*/
+/**/
+/*    double pre      = 1. / post;*/
+/**/
+/*    size_t nb_ctx = ciphertextVec.size();*/
+/*    std::vector<Ciphertext<DCRTPoly>> result(nb_ctx);*/
+/**/
+/*    bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&*/
+/*                         (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);*/
+/**/
+/*    if (slots == M / 4) {*/
+/*        bool use_imslots = true;*/
+/*        std::vector<Ciphertext<DCRTPoly>> ctxtCtS(nb_ctx), ctxtCtSI(nb_ctx);*/
+/*        auto evalKeyMap = cc->GetEvalAutomorphismKeyMap(ctxtCtS[0]->GetKeyTag());*/
+/*        Ciphertext<DCRTPoly> conj;*/
+/**/
+/*        //------------------------------------------------------------------------------*/
+/*        // FULLY PACKED CASE*/
+/*        //------------------------------------------------------------------------------*/
+/**/
+/*#ifdef BOOTSTRAPTIMING*/
+/*    TIC(t);*/
+/*#endif*/
+/**/
+/*        //------------------------------------------------------------------------------*/
+/*        // Running SlotToCoeff*/
+/*        //------------------------------------------------------------------------------*/
+/**/
+/*        #pragma omp parallel for*/
+/*        for (size_t c = 0; c < nb_ctx; ++c) {*/
+/*            auto ctxtStC = (isLTBootstrap) ? EvalLinearTransform(precom->m_U0Pre, ciphertextVec[c]):*/
+/*                                             EvalSlotsToCoeffs(precom->m_U0PreFFT, ciphertextVec[c]);*/
+/**/
+/*            //------------------------------------------------------------------------------*/
+/*            // RAISING THE MODULUS*/
+/*            //------------------------------------------------------------------------------*/
+/*            Ciphertext<DCRTPoly> raised = ctxtStC;*/
+/*            auto algo                   = cc->GetScheme();*/
+/*            algo->ModReduceInternalInPlace(raised, raised->GetNoiseScaleDeg() - 1);*/
+/**/
+/*            auto ctxtDCRT = raised->GetElements();*/
+/**/
+/*            for (size_t i = 0; i < ctxtDCRT.size(); i++) {*/
+/*                DCRTPoly temp(elementParamsRaisedPtr, COEFFICIENT);*/
+/*                ctxtDCRT[i].SetFormat(COEFFICIENT);*/
+/*                temp = ctxtDCRT[i].GetElementAtIndex(0);*/
+/*                temp.SetFormat(EVALUATION);*/
+/*                ctxtDCRT[i] = temp;*/
+/*            }*/
+/**/
+/*            raised->SetLevel(L0 - ctxtDCRT[0].GetNumOfElements());*/
+/*            raised->SetElements(std::move(ctxtDCRT));*/
+/**/
+/*            double constantEvalMult = pre / N;*/
+/*            cc->EvalMultInPlace(raised, constantEvalMult);*/
+/**/
+/*            //------------------------------------------------------------------------------*/
+/*            // Running CoeffToSlot*/
+/*            //------------------------------------------------------------------------------*/
+/**/
+/*            ctxtCtS[c] = (isLTBootstrap) ? EvalLinearTransform(precom->m_U0hatTPre, raised):*/
+/*                                             EvalCoeffsToSlots(precom->m_U0hatTPreFFT, raised);*/
+/**/
+/*            conj = Conjugate(ctxtCtS[c], evalKeyMap);*/
+/**/
+/*            if (use_imslots) {*/
+/*                ctxtCtSI[c] = cc->EvalSub(ctxtCtS[c], conj);*/
+/*                algo->MultByMonomialInPlace(ctxtCtSI[c], 3 * M / 4);*/
+/**/
+/*                cc->EvalAddInPlace(ctxtCtS[c], conj);*/
+/**/
+/*                if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {*/
+/*                    #pragma omp parallel sections*/
+/*                    {*/
+/*                        #pragma omp section*/
+/*                        {*/
+/*                            while (ctxtCtS[c]->GetNoiseScaleDeg() > 1) {*/
+/*                                cc->ModReduceInPlace(ctxtCtS[c]);*/
+/*                            }*/
+/*                        }*/
+/*                        #pragma omp section*/
+/*                        {*/
+/*                            while (ctxtCtSI[c]->GetNoiseScaleDeg() > 1) {*/
+/*                                cc->ModReduceInPlace(ctxtCtSI[c]);*/
+/*                            }*/
+/*                        }*/
+/*                    }*/
+/*                }*/
+/*                else {*/
+/*                    #pragma omp parallel sections*/
+/*                    {*/
+/*                        #pragma omp section*/
+/*                        {*/
+/*                            if (ctxtCtS[c]->GetNoiseScaleDeg() == 2) {*/
+/*                                algo->ModReduceInternalInPlace(ctxtCtS[c], BASE_NUM_LEVELS_TO_DROP);*/
+/*                            }*/
+/*                        }*/
+/*                        #pragma omp section*/
+/*                        {*/
+/*                            if (ctxtCtSI[c]->GetNoiseScaleDeg() == 2) {*/
+/*                                algo->ModReduceInternalInPlace(ctxtCtSI[c], BASE_NUM_LEVELS_TO_DROP);*/
+/*                            }*/
+/*                        }*/
+/**/
+/*                    }*/
+/*                }*/
+/*            }*/
+/*            else {*/
+/*                cc->EvalAddInPlace(ctxtCtS[c], conj);*/
+/**/
+/*                if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {*/
+/*                    while (ctxtCtS[c]->GetNoiseScaleDeg() > 1) {*/
+/*                        cc->ModReduceInPlace(ctxtCtS[c]);*/
+/*                    }*/
+/*                }*/
+/*                else {*/
+/*                    if (ctxtCtS[c]->GetNoiseScaleDeg() == 2) {*/
+/*                        algo->ModReduceInternalInPlace(ctxtCtS[c], BASE_NUM_LEVELS_TO_DROP);*/
+/*                    }*/
+/*                }*/
+/*            }*/
+/*        }*/
+/**/
+/*        //------------------------------------------------------------------------------*/
+/*        // Running EvalLUT*/
+/*        //------------------------------------------------------------------------------*/
+/**/
+/*        int K = K_FUNC;*/
+/*        int powR = pow(2, R_FUNC);*/
+/*        auto f = [K, powR](double x) -> std::complex<double> { return std::exp(std::complex<double>(0, 2 * M_PI * K * x / powR)); };*/
+/**/
+/*        bool use_ps = num_poi > 3 && num_poi < 17;*/
+/**/
+/*        if (use_imslots) {*/
+/*            std::vector<Ciphertext<DCRTPoly>> ctxtExp(nb_ctx), ctxtExpI(nb_ctx), ctxtInterp(nb_ctx), ctxtInterpI(nb_ctx);*/
+/**/
+/*            #pragma omp parallel sections*/
+/*            {*/
+/*                #pragma omp section*/
+/*                {*/
+/*                    #pragma omp parallel for*/
+/*                    for (size_t i = 0; i < nb_ctx; ++i) {*/
+/*                        ctxtExp[i] = cc->EvalChebyshevFunction(f, ctxtCtS[i], -1, 1, 16); // 14 low*/
+/*                        for (uint32_t i = 0; i < R_FUNC; ++i) {*/
+/*                            cc->EvalSquareInPlace(ctxtExp[i]);*/
+/*                            cc->ModReduceInPlace(ctxtExp[i]);*/
+/*                        }*/
+/**/
+/*                        if (use_ps) {*/
+/*                            auto ctxtVecPowersExp = cc->ComputePowersPS(ctxtExp[i], num_poi - 1);*/
+/*                            auto ctxtPowersExp = ctxtVecPowersExp[0];*/
+/*                            auto ctxtPowers2Exp = ctxtVecPowersExp[1];*/
+/*                            auto ctxtPower2km1Exp = ctxtVecPowersExp[2][0];*/
+/**/
+/*                            #pragma omp parallel for*/
+/*                            for (size_t i = 0; i < nb_func; ++i) {*/
+/*                                auto& func = func_vec[i];*/
+/*                                ctxtInterp[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, ctxtPowers2Exp, ctxtPower2km1Exp, num_poi);*/
+/*                                conj = Conjugate(ctxtInterp[i], evalKeyMap);*/
+/*                                cc->EvalAddInPlace(ctxtInterp[i], conj);*/
+/*                            }*/
+/*                        }*/
+/*                        else {*/
+/*                            auto ctxtPowersExp = cc->ComputePowersLinear(ctxtExp[i], num_poi - 1);*/
+/**/
+/*                            #pragma omp parallel for*/
+/*                            for (size_t i = 0; i < nb_func; ++i) {*/
+/*                                auto& func = func_vec[i];*/
+/*                                ctxtInterp[i] = cc->EvalHermitePrecomLinearFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, num_poi);*/
+/*                                conj = Conjugate(ctxtInterp[i], evalKeyMap);*/
+/*                                cc->EvalAddInPlace(ctxtInterp[i], conj);*/
+/*                            }*/
+/*                        }*/
+/*                    }*/
+/*                }*/
+/**/
+/*                #pragma omp section*/
+/*                {*/
+/*                    #pragma omp parallel for*/
+/*                    for (size_t i = 0; i < nb_ctx; ++i) {*/
+/*                        ctxtExpI[i] = cc->EvalChebyshevFunction(f, ctxtCtSI[i], -1, 1, 16);*/
+/*                        for (uint32_t i = 0; i < R_FUNC; ++i) {*/
+/*                            cc->EvalSquareInPlace(ctxtExpI[i]);*/
+/*                            cc->ModReduceInPlace(ctxtExpI[i]);*/
+/*                        }*/
+/*                    }*/
+/**/
+/*                    if (use_ps) {*/
+/*                        auto ctxtVecPowersExpI = cc->ComputePowersPS(ctxtExpI, num_poi - 1);*/
+/*                        auto ctxtPowersExpI = ctxtVecPowersExpI[0];*/
+/*                        auto ctxtPowers2ExpI = ctxtVecPowersExpI[1];*/
+/*                        auto ctxtPower2km1ExpI = ctxtVecPowersExpI[2][0];*/
+/**/
+/*                        #pragma omp parallel for*/
+/*                        for (size_t i = 0; i < nb_func; ++i) {*/
+/*                            auto& func = func_vec[i];*/
+/*                            ctxtInterpI[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExpI, ctxtPowers2ExpI, ctxtPower2km1ExpI, num_poi);*/
+/*                            conj = Conjugate(ctxtInterpI[i], evalKeyMap);*/
+/*                            cc->EvalAddInPlace(ctxtInterpI[i], conj);*/
+/*                        }*/
+/*                    }*/
+/*                    else {*/
+/*                        auto ctxtPowersExpI = cc->ComputePowersLinear(ctxtExpI, num_poi - 1);*/
+/**/
+/*                        #pragma omp parallel for*/
+/*                        for (size_t i = 0; i < nb_func; ++i) {*/
+/*                            auto& func = func_vec[i];*/
+/*                            ctxtInterpI[i] = cc->EvalHermitePrecomLinearFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExpI, num_poi);*/
+/*                            conj = Conjugate(ctxtInterpI[i], evalKeyMap);*/
+/*                            cc->EvalAddInPlace(ctxtInterpI[i], conj);*/
+/*                        }*/
+/*                    }*/
+/*                }*/
+/*            }*/
+/**/
+/*            #pragma omp parallel for*/
+/*            for (size_t i = 0; i < nb_func; ++i) {*/
+/*                result[i] = cc->EvalAdd(ctxtInterp[i], ctxtInterpI[i]);*/
+/*            }*/
+/*        }*/
+/*        else {*/
+/*            std::vector<Ciphertext<DCRTPoly>> ctxtExp(nb_ctx), ctxtInterp(nb_func);*/
+/**/
+/*            #pragma omp parallel for*/
+/*            for (size_t i = 0; i < nb_ctx; ++i) {*/
+/*                ctxtExp[i] = cc->EvalChebyshevFunction(f, ctxtCtS[i], -1, 1, 16); // 14 low*/
+/*                for (uint32_t i = 0; i < R_FUNC; ++i) {*/
+/*                    cc->EvalSquareInPlace(ctxtExp[i]);*/
+/*                    cc->ModReduceInPlace(ctxtExp[i]);*/
+/*                }*/
+/*            }*/
+/**/
+/*            auto ctxtVecPowersExp = cc->ComputePowersPS(ctxtExp, num_poi - 1);*/
+/*            auto ctxtPowersExp = ctxtVecPowersExp[0];*/
+/*            auto ctxtPowers2Exp = ctxtVecPowersExp[1];*/
+/*            auto ctxtPower2km1Exp = ctxtVecPowersExp[2][0];*/
+/**/
+/*            #pragma omp parallel for*/
+/*            for (size_t i = 0; i < nb_func; ++i) {*/
+/*                auto& func = func_vec[i];*/
+/*                ctxtInterp[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, ctxtPowers2Exp, ctxtPower2km1Exp, num_poi);*/
+/*                conj = Conjugate(ctxtInterp[i], evalKeyMap);*/
+/*                cc->EvalAddInPlace(ctxtInterp[i], conj);*/
+/*            }*/
+/**/
+/*            #pragma omp parallel for*/
+/*            for (size_t i = 0; i < nb_func; ++i) {*/
+/*                result[i] = ctxtInterp[i];*/
+/*            }*/
+/*        }*/
+/**/
+/*#ifdef BOOTSTRAPTIMING*/
+/*    timeLUT = TOC(t);*/
+/*    std::cerr << "EvalLUT time: " << (timeLUT) / 1000.0 << " s" << std::endl;*/
+/*#endif*/
+/**/
+/*    }*/
+/*    else {*/
+/*        OPENFHE_THROW("Sparse packing Functional Bootstrapping not yet implemented.");*/
+/*    }*/
+/**/
+/*    return result;*/
+/*}*/
+
+
+// WIP: @jdumezy
+std::vector<std::function<double(double)>> decomposeBasisFunction(std::function<double(double)> f, int num_poi) {
+    int n = pow(2, std::log2(num_poi)/2);
+    
+    std::vector<std::function<double(double)>> msbFunctions(n);
+    std::vector<std::function<double(double)>> lsbFunctions(n);
+    
+    for (int msb = 0; msb < n; ++msb) {
+        msbFunctions[msb] = [f, msb](double x) -> double {
+            unsigned int result = (unsigned int)f(16 * x + msb);
+            return (double)(result >> 4);
+        };
+    }
+    
+    for (int lsb = 0; lsb < 16; ++lsb) {
+        lsbFunctions[lsb] = [f, lsb](double x) -> double {
+            unsigned int result = (unsigned int)f(16 * lsb + x);
+            return (double)(result & 0xF);
+        };
+    }
+
+    std::vector<std::function<double(double)>> allFunctions;
+    allFunctions.insert(allFunctions.end(), msbFunctions.begin(), msbFunctions.end());
+    allFunctions.insert(allFunctions.end(), lsbFunctions.begin(), lsbFunctions.end());
+    
+    return allFunctions;
+}
+
+
+
+std::vector<std::function<double(double)>> createEqualFunction(int num_poi) {
+    int n = pow(2, std::log2(num_poi)/2);
+    std::vector<std::function<double(double)>> functions(n);
+    for (int i = 0; i < n; ++i) {
+        functions[i] = [i, n](double x) -> double { return x == i ? n : 0; };
+    }
+    return functions;
+}
+
+
+
+std::vector<Ciphertext<DCRTPoly>> multCiphertextVec(std::vector<Ciphertext<DCRTPoly>> c0,
+                                                    std::vector<Ciphertext<DCRTPoly>> c1,
+                                                    CryptoContext<DCRTPoly> cc) {
+    size_t n = c0.size();
+    size_t k = n / 2;
+    std::vector<Ciphertext<DCRTPoly>> result(n);
+
+    #pragma omp parallel for
+    for (size_t i = 0; i < n; ++i) {
+        Ciphertext<DCRTPoly> a, b;
+        if (i < k) {
+            a = c0[i];
+            b = cc->EvalMult(c1[i], 1. / k);
+            cc->ModReduceInPlace(b);
+        }
+        else {
+            a = cc->EvalMult(c0[i], 1. / k);
+            b = c1[i];
+            cc->ModReduceInPlace(a);
+        }
+
+        result[i] = cc->EvalMult(a, b);
+        cc->ModReduceInPlace(result[i]);
+    }
+
+    return result;
+}
+
+
+
+bool isNotZeroFunction(std::function<double(double)> f, size_t n) {
+    bool r = 0;
+    for (size_t i = 0; i < n; ++i) {
+        r = r || f(i);
+    }
+    return r;
+}
+
+
+Ciphertext<DCRTPoly> FHECKKSRNS::EvalFuncSimpleTreeMVB(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
+                                                       int num_poi, int order) const {
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+
+    if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
+        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for the Hybrid key switching method.");
+    if (cryptoParams->GetScalingTechnique() != FIXEDMANUAL)
+        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for FIXEDMANUAL scaling.");
+    if(cryptoParams->GetSecretKeyDist() != SPARSE_TERNARY)
+        OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for SPARSE_TERNARY key.");
+#if NATIVEINT == 128 && !defined(__EMSCRIPTEN__)
+    OPENFHE_THROW("128-bit CKKS Functional Bootstrapping is not supported for 128 NATIVEINT.");
+#endif
+
+    auto cc     = ciphertext->GetCryptoContext();
+    uint32_t M  = cc->GetCyclotomicOrder();
+    uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();
+
+    uint32_t slots = ciphertext->GetSlots();
+
+    auto pair = m_bootPrecomMap.find(slots);
+    if (pair == m_bootPrecomMap.end()) {
+        std::string errorMsg(std::string("Precomputations for ") + std::to_string(slots) +
+                             std::string(" slots were not generated") +
+                             std::string(" Need to call EvalBootstrapSetup and then EvalBootstrapKeyGen to proceed"));
+        OPENFHE_THROW(errorMsg);
+    }
+    const std::shared_ptr<CKKSBootstrapPrecom> precom = pair->second;
+    size_t N                                          = cc->GetRingDimension();
+
+    auto elementParamsRaised = *(cryptoParams->GetElementParams());
+
+    auto paramsQ = elementParamsRaised.GetParams();
+    usint sizeQ  = paramsQ.size();
+
+    std::vector<NativeInteger> moduli(sizeQ);
+    std::vector<NativeInteger> roots(sizeQ);
+    for (size_t i = 0; i < sizeQ; i++) {
+        moduli[i] = paramsQ[i]->GetModulus();
+        roots[i]  = paramsQ[i]->GetRootOfUnity();
+    }
+    auto elementParamsRaisedPtr = std::make_shared<ILDCRTParams<DCRTPoly::Integer>>(M, moduli, roots);
+
+    NativeInteger q = elementParamsRaisedPtr->GetParams()[0]->GetModulus().ConvertToInt();
+    double qDouble  = q.ConvertToDouble();
+
+    const auto p = cryptoParams->GetPlaintextModulus();
+    double powP  = pow(2, p);
+
+    int32_t deg = std::round(std::log2(qDouble / powP));
+#if NATIVEINT != 128
+    if (deg > static_cast<int32_t>(m_correctionFactor)) {
+        OPENFHE_THROW("Degree [" + std::to_string(deg) + "] must be less than or equal to the correction factor [" +
+                      std::to_string(m_correctionFactor) + "].");
+    }
+#endif
+    double post         = std::pow(2, static_cast<double>(deg));
+
+    double pre      = 1. / post;
+
+    Ciphertext<DCRTPoly> result;
+
+    bool isLTBootstrap = (precom->m_paramsEnc[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1) &&
+                         (precom->m_paramsDec[CKKS_BOOT_PARAMS::LEVEL_BUDGET] == 1);
+
+    if (slots == M / 4) {
+
+        //------------------------------------------------------------------------------
+        // FULLY PACKED CASE
+        //------------------------------------------------------------------------------
+
+        //------------------------------------------------------------------------------
+        // Running SlotToCoeff
+        //------------------------------------------------------------------------------
+
+        auto ctxtStC = (isLTBootstrap) ? EvalLinearTransform(precom->m_U0Pre, ciphertext):
+                                         EvalSlotsToCoeffs(precom->m_U0PreFFT, ciphertext);
+
+        //------------------------------------------------------------------------------
+        // RAISING THE MODULUS
+        //------------------------------------------------------------------------------
+        Ciphertext<DCRTPoly> raised = ctxtStC;
+        auto algo                   = cc->GetScheme();
+        algo->ModReduceInternalInPlace(raised, raised->GetNoiseScaleDeg() - 1);
+
+        auto ctxtDCRT = raised->GetElements();
+
+        for (size_t i = 0; i < ctxtDCRT.size(); i++) {
+            DCRTPoly temp(elementParamsRaisedPtr, COEFFICIENT);
+            ctxtDCRT[i].SetFormat(COEFFICIENT);
+            temp = ctxtDCRT[i].GetElementAtIndex(0);
+            temp.SetFormat(EVALUATION);
+            ctxtDCRT[i] = temp;
+        }
+
+        raised->SetLevel(L0 - ctxtDCRT[0].GetNumOfElements());
+        raised->SetElements(std::move(ctxtDCRT));
+
+        double constantEvalMult = pre / N;
+        cc->EvalMultInPlace(raised, constantEvalMult);
+
+        //------------------------------------------------------------------------------
+        // Running CoeffToSlot
+        //------------------------------------------------------------------------------
+
+        auto ctxtCtS = (isLTBootstrap) ? EvalLinearTransform(precom->m_U0hatTPre, raised):
+                                         EvalCoeffsToSlots(precom->m_U0hatTPreFFT, raised);
+
+
+        auto evalKeyMap = cc->GetEvalAutomorphismKeyMap(ctxtCtS->GetKeyTag());
+        auto conj = Conjugate(ctxtCtS, evalKeyMap);
+        Ciphertext<DCRTPoly> ctxtCtSI;
+        
+        ctxtCtSI = cc->EvalSub(ctxtCtS, conj);
+        algo->MultByMonomialInPlace(ctxtCtSI, 3 * M / 4);
+
+        cc->EvalAddInPlace(ctxtCtS, conj);
+
+        if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    while (ctxtCtS->GetNoiseScaleDeg() > 1) {
+                        cc->ModReduceInPlace(ctxtCtS);
+                    }
+                }
+                #pragma omp section
+                {
+                    while (ctxtCtSI->GetNoiseScaleDeg() > 1) {
+                        cc->ModReduceInPlace(ctxtCtSI);
+                    }
+                }
+            }
+        }
+        else {
+            #pragma omp parallel sections
+            {
+                #pragma omp section
+                {
+                    if (ctxtCtS->GetNoiseScaleDeg() == 2) {
+                        algo->ModReduceInternalInPlace(ctxtCtS, BASE_NUM_LEVELS_TO_DROP);
+                    }
+                }
+                #pragma omp section
+                {
+                    if (ctxtCtSI->GetNoiseScaleDeg() == 2) {
+                        algo->ModReduceInternalInPlace(ctxtCtSI, BASE_NUM_LEVELS_TO_DROP);
+                    }
+                }
+
+            }
+        }
+
+        //------------------------------------------------------------------------------
+        // Running EvalLUT
+        //------------------------------------------------------------------------------
+
+        int K = K_FUNC;
+        int powR = pow(2, R_FUNC);
+        auto f = [K, powR](double x) -> std::complex<double> { return std::exp(std::complex<double>(0, 2 * M_PI * K * x / powR)); };
+
+        auto functions = decomposeBasisFunction(func, num_poi);
+        auto functions_eq = createEqualFunction(num_poi);
+        size_t nb_func = functions.size();
+        size_t basis = nb_func / 2;
+
+
+        bool use_ps = basis > 3 && basis < 17;
+
+        std::vector<std::function<double(double)>> combined1(nb_func);
+        std::vector<std::function<double(double)>> combined2(nb_func);
+
+        for (size_t i = 0; i < basis; ++i) {
+            combined1[i] = functions[i];
+            combined2[i] = functions_eq[i];
+        }
+
+        for (size_t i = basis; i < nb_func; ++i) {
+            combined1[i] = functions_eq[i - basis];
+            combined2[i] = functions[i];
+        }
+
+        std::vector<Ciphertext<DCRTPoly>> ctxtInterp(nb_func), ctxtInterpI(nb_func);
+
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                auto ctxtExp = cc->EvalChebyshevFunction(f, ctxtCtS, -1, 1, 16); // 14 low
+                for (uint32_t i = 0; i < R_FUNC; ++i) {
+                    cc->EvalSquareInPlace(ctxtExp);
+                    cc->ModReduceInPlace(ctxtExp);
+                }
+
+                if (use_ps) {
+                    auto ctxtVecPowersExp = cc->ComputePowersPS(ctxtExp, basis - 1);
+                    auto ctxtPowersExp = ctxtVecPowersExp[0];
+                    auto ctxtPowers2Exp = ctxtVecPowersExp[1];
+                    auto ctxtPower2km1Exp = ctxtVecPowersExp[2][0];
+
+                    #pragma omp parallel for
+                    for (size_t i = 0; i < nb_func; ++i) {
+                        auto& func = combined1[i];
+                        ctxtInterp[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, ctxtPowers2Exp, ctxtPower2km1Exp, basis);
+                        conj = Conjugate(ctxtInterp[i], evalKeyMap);
+                        cc->EvalAddInPlace(ctxtInterp[i], conj);
+                    }
+                }
+                else {
+                    auto ctxtPowersExp = cc->ComputePowersLinear(ctxtExp, basis - 1);
+
+                    #pragma omp parallel for
+                    for (size_t i = 0; i < nb_func; ++i) {
+                        auto& func = combined1[i];
+                        ctxtInterp[i] = cc->EvalHermitePrecomLinearFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExp, basis);
+                        conj = Conjugate(ctxtInterp[i], evalKeyMap);
+                        cc->EvalAddInPlace(ctxtInterp[i], conj);
+                    }
+                }
+            }
+
+            #pragma omp section
+            {
+                auto ctxtExpI = cc->EvalChebyshevFunction(f, ctxtCtSI, -1, 1, 16);
+                for (uint32_t i = 0; i < R_FUNC; ++i) {
+                    cc->EvalSquareInPlace(ctxtExpI);
+                    cc->ModReduceInPlace(ctxtExpI);
+                }
+
+                if (use_ps) {
+                    auto ctxtVecPowersExpI = cc->ComputePowersPS(ctxtExpI, basis - 1);
+                    auto ctxtPowersExpI = ctxtVecPowersExpI[0];
+                    auto ctxtPowers2ExpI = ctxtVecPowersExpI[1];
+                    auto ctxtPower2km1ExpI = ctxtVecPowersExpI[2][0];
+
+                    #pragma omp parallel for
+                    for (size_t i = 0; i < nb_func; ++i) {
+                        auto& func = combined2[i];
+                        ctxtInterpI[i] = cc->EvalHermitePrecomPSFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExpI, ctxtPowers2ExpI, ctxtPower2km1ExpI, basis);
+                        conj = Conjugate(ctxtInterpI[i], evalKeyMap);
+                        cc->EvalAddInPlace(ctxtInterpI[i], conj);
+                    }
+                }
+                else {
+                    auto ctxtPowersExpI = cc->ComputePowersLinear(ctxtExpI, basis - 1);
+
+                    #pragma omp parallel for
+                    for (size_t i = 0; i < nb_func; ++i) {
+                        auto& func = combined2[i];
+                        ctxtInterpI[i] = cc->EvalHermitePrecomLinearFunction([func](double x) -> double { return 0.5 * func(x); }, ctxtPowersExpI, basis);
+                        conj = Conjugate(ctxtInterpI[i], evalKeyMap);
+                        cc->EvalAddInPlace(ctxtInterpI[i], conj);
+                    }
+                }
+            }
+        }
+
+        auto ctxt_mult = multCiphertextVec(ctxtInterp, ctxtInterpI, cc);
+
+        std::vector<Ciphertext<DCRTPoly>> msb_ctx_vec(basis), lsb_ctx_vec(basis);
+
+        #pragma omp parallel for
+        for (size_t i = 0; i < basis; ++i) {
+            msb_ctx_vec[i] = ctxt_mult[i];
+            lsb_ctx_vec[i] = ctxt_mult[i + basis];
+        }
+
+        Ciphertext<DCRTPoly> msb_ctx, lsb_ctx;
+
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                msb_ctx = cc->EvalAddMany(msb_ctx_vec);
+            }
+            #pragma omp section
+            {
+                lsb_ctx = cc->EvalAddMany(lsb_ctx_vec);
+                algo->MultByMonomialInPlace(lsb_ctx, M / 4);
+            }
+        }
+
+        result = cc->EvalAdd(msb_ctx, lsb_ctx);
+    }
+    else {
+        OPENFHE_THROW("Sparse packing Functional Bootstrapping not yet implemented.");
+    }
+
+    return result;
+}
 
 
 //------------------------------------------------------------------------------

@@ -151,10 +151,10 @@ public:
 
     void EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
                             std::vector<uint32_t> dim1, uint32_t slots, uint32_t correctionFactor,
-                            bool precompute, bool stcFirst, bool functional) override;
+                            bool precompute, bool stcFirst, bool functional, int bits) override;
 
     void EvalFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
-                                std::vector<uint32_t> dim1, uint32_t numSlots) override;
+                                std::vector<uint32_t> dim1, uint32_t numSlots, int bits) override;
 
     std::shared_ptr<std::map<usint, EvalKey<DCRTPoly>>> EvalBootstrapKeyGen(const PrivateKey<DCRTPoly> privateKey,
                                                                             uint32_t slots) override;
@@ -168,6 +168,12 @@ public:
 
     Ciphertext<DCRTPoly> EvalFuncBootstrap(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
                                            int num_poi, int order) const override;
+
+    std::vector<Ciphertext<DCRTPoly>> EvalFuncMVBootstrap(ConstCiphertext<DCRTPoly> ciphertext, std::vector<std::function<double(double)>> func_vec,
+                                                          int num_poi, int order) const override;
+
+    Ciphertext<DCRTPoly> EvalFuncSimpleTreeMVB(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
+                                               int num_poi, int order) const override;
 
     //------------------------------------------------------------------------------
     // Find Rotation Indices

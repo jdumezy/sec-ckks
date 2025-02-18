@@ -91,12 +91,12 @@ public:
    */
     virtual void EvalBootstrapSetup(const CryptoContextImpl<Element>& cc, std::vector<uint32_t> levelBudget,
                                     std::vector<uint32_t> dim1, uint32_t slots, uint32_t correctionFactor,
-                                    bool precompute, bool stcFirst, bool functional) {
+                                    bool precompute, bool stcFirst, bool functional, int bits) {
         OPENFHE_THROW("Not supported");
     }
 
     virtual void EvalFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
-                                       std::vector<uint32_t> dim1, uint32_t numSlots) {
+                                       std::vector<uint32_t> dim1, uint32_t numSlots, int bits) {
         OPENFHE_THROW("Not supported");
     }
 
@@ -149,6 +149,16 @@ public:
     virtual Ciphertext<Element> EvalFuncBootstrap(ConstCiphertext<Element> ciphertext, std::function<double(double)> func,
                                                   int num_poi, int order) const {
         OPENFHE_THROW("EvalFuncBootstrap is not implemented for this scheme");
+    }
+
+    virtual std::vector<Ciphertext<Element>> EvalFuncMVBootstrap(ConstCiphertext<Element> ciphertext, std::vector<std::function<double(double)>> func_vec,
+                                                                 int num_poi, int order) const {
+        OPENFHE_THROW("EvalFuncMVBootstrap is not implemented for this scheme");
+    }
+
+    virtual Ciphertext<DCRTPoly> EvalFuncSimpleTreeMVB(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
+                                                       int num_poi, int order) const {
+        OPENFHE_THROW("EvalFuncSimpleTreeMVB is not implemented for this scheme");
     }
 
     /**

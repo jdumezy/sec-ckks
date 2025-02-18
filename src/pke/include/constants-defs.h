@@ -47,6 +47,7 @@ enum PKESchemeFeature {
     MULTIPARTY   = 0x20,
     FHE          = 0x40,
     SCHEMESWITCH = 0x80,
+    FBTS         = 0xA0,
 };
 
 enum ScalingTechnique {

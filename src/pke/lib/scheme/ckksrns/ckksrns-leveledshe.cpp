@@ -78,33 +78,6 @@ void LeveledSHECKKSRNS::EvalAddInPlace(Ciphertext<DCRTPoly>& ciphertext, double 
 
 void LeveledSHECKKSRNS::EvalAddInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const {
     const auto cc = ciphertext->GetCryptoContext();
-    
-    /*uint32_t M     = cc->GetCyclotomicOrder();*/
-    /*std::vector<DCRTPoly>& cv = ciphertext->GetElements();*/
-    /*auto el                   = GetElementForEvalAddOrSubComplex(ciphertext, operand);*/
-    /*cv[0]                     = cv[0] + el[0];*/
-    /*MultByMonomialInPlace(ciphertext, 3 * M / 4);*/
-    /*cv[0]                     = cv[0] + el[1];*/
-    /*MultByMonomialInPlace(ciphertext, M / 4);*/
-
-    // v2
-    /*uint32_t M     = cc->GetCyclotomicOrder();*/
-    /*EvalAddInPlace(ciphertext, operand.real());*/
-    /*MultByMonomialInPlace(ciphertext, 3 * M / 4);*/
-    /*EvalAddInPlace(ciphertext, operand.imag());*/
-    /*MultByMonomialInPlace(ciphertext, M / 4);*/
-
-    // v3
-    /*const auto elemParams     = cv[0].GetParams();*/
-    /*DCRTPoly a(elemParams);*/
-    /*std::cout << cv[0] * a << std::endl;*/
-
-    /*std::vector<DCRTPoly>& cv = ciphertext->GetElements();*/
-    /*auto el                   = GetElementForEvalAddOrSubComplex(ciphertext, operand);*/
-    /*auto b = ToComplex(ciphertext, el[1]);*/
-    /*cv[0]                     = cv[0] + el[0] + b;*/
-
-    // default
     std::vector<std::complex<double>> v(ciphertext->GetSlots(), operand);
     Plaintext ptx = cc->MakeCKKSPackedPlaintext(v);
     ciphertext = cc->EvalAdd(ciphertext, ptx);
@@ -132,10 +105,6 @@ void LeveledSHECKKSRNS::EvalSubInPlace(Ciphertext<DCRTPoly>& ciphertext, double 
 }
 
 void LeveledSHECKKSRNS::EvalSubInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const {
-    /*
-    std::vector<DCRTPoly>& cv = ciphertext->GetElements();
-    cv[0]                     = cv[0] - GetElementForEvalAddOrSub(ciphertext, operand.real());
-    */
     const auto cc = ciphertext->GetCryptoContext();
     std::vector<std::complex<double>> v(ciphertext->GetSlots(), operand);
     Plaintext ptx = cc->MakeCKKSPackedPlaintext(v);
@@ -171,18 +140,6 @@ void LeveledSHECKKSRNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, double
 }
 
 void LeveledSHECKKSRNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const {
-    /*
-    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
-
-    if (cryptoParams->GetScalingTechnique() != FIXEDMANUAL) {
-        if (ciphertext->GetNoiseScaleDeg() == 2) {
-            ModReduceInternalInPlace(ciphertext, BASE_NUM_LEVELS_TO_DROP);
-        }
-    }
-
-    EvalMultCoreInPlace(ciphertext, operand.real());
-    */
-
     const auto cc = ciphertext->GetCryptoContext();
     std::vector<std::complex<double>> v(ciphertext->GetSlots(), operand);
     Plaintext ptx = cc->MakeCKKSPackedPlaintext(v);

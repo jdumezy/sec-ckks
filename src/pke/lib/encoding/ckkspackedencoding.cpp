@@ -423,7 +423,7 @@ bool CKKSPackedEncoding::Encode() {
 #endif
 
 bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, ScalingTechnique scalTech,
-                                ExecutionMode executionMode) {
+                                ExecutionMode executionMode, bool fbts) {
     double p       = encodingParams->GetPlaintextModulus();
     double powP    = 0.0;
     uint32_t Nh    = GetElementRingDimension() / 2;
@@ -516,31 +516,9 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
     /*double logstd = std::log2(stddev);*/
 
     if (executionMode == EXEC_NOISE_ESTIMATION) {
-        /*m_logError = logstd;*/
+        OPENFHE_THROW("EXEC_NOISE_ESTIMATION in no longer supported in secCKKS!");
     }
     else {
-        // if stddev < sqrt{N}/8 (minimum approximation error that can be achieved)
-        /*if (stddev < 0.125 * std::sqrt(GetElementRingDimension())) {*/
-        /*    stddev = 0.125 * std::sqrt(GetElementRingDimension());*/
-        /*}*/
-
-        // if stddev < sqrt{N}/4 (minimum approximation error that can be achieved)
-        // if (stddev < 0.125 * std::sqrt(GetElementRingDimension())) {
-        //   if (noiseScaleDeg <= 1) {
-        //    OPENFHE_THROW(
-        //                   "The decryption failed because the approximation error is
-        //                   " "too small. Check the protocol used. ");
-        //  } else {  // noiseScaleDeg > 1 and no rescaling operations have been applied yet
-        //    stddev = 0.125 * std::sqrt(GetElementRingDimension());
-        //  }
-        // }
-
-        //   If less than 5 bits of precision is observed
-        /*if (logstd > p - 5.0)*/
-        /*    OPENFHE_THROW(*/
-        /*        "The decryption failed because the approximation error is "*/
-        /*        "too high. Check the parameters. ");*/
-
         // real values
         std::vector<std::complex<double>> realValues(slots);
 
@@ -561,14 +539,9 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
         // We would add sampling only for even indices of i.
         // This change should be done together with the one below.
         for (size_t i = 0; i < slots; ++i) {
-            /*double real = scale * (curValues[i].real() + conjugate[i].real());*/
             double real = scale * (curValues[i].real());
-            // real += powP * dgg.GenerateIntegerKarney(0.0, stddev);
-            /*real += powP * d(g);*/
-            /*double imag = scale * (curValues[i].imag() + conjugate[i].imag());*/
             double imag = scale * (curValues[i].imag());
-            // imag += powP * dgg.GenerateIntegerKarney(0.0, stddev);
-            /*imag += powP * d(g);*/
+
             realValues[i].real(real);
             realValues[i].imag(imag);
         }
@@ -579,12 +552,13 @@ bool CKKSPackedEncoding::Decode(size_t noiseScaleDeg, double scalingFactor, Scal
         // above.
         DiscreteFourierTransform::FFTSpecial(realValues, GetElementRingDimension() * 2);
 
-        // clears all imaginary values for security reasons
-        /*for (size_t i = 0; i < realValues.size(); ++i)*/
-        /*    realValues[i].imag(0.0);*/
+        if (fbts) {
+            for (size_t i = 0; i < slots; ++i) {
+                realValues[i].real(std::round(realValues[i].real()));
+                realValues[i].imag(std::round(realValues[i].imag()));
+            }
+        }
 
-        // sets an estimate of the approximation error
-        /*m_logError = std::round(std::log2(stddev * std::sqrt(2 * slots)));*/
         m_logError = 0;
 
         value = realValues;

@@ -86,6 +86,10 @@ public:
     Ciphertext<DCRTPoly> EvalPolyLinear(ConstCiphertext<DCRTPoly> x,
                                         const std::vector<std::complex<double>>& coefficients) const override;
 
+    std::vector<Ciphertext<DCRTPoly>> ComputePowersLinear(ConstCiphertext<DCRTPoly> x, size_t k) const override;
+
+    Ciphertext<DCRTPoly> EvalPolyLinear(std::vector<Ciphertext<DCRTPoly>> powers, const std::vector<std::complex<double>>& coefficients) const override;
+
     Ciphertext<DCRTPoly> InnerEvalPolyPS(ConstCiphertext<DCRTPoly> x, const std::vector<double>& coefficients,
                                          uint32_t k, uint32_t m, std::vector<Ciphertext<DCRTPoly>>& powers,
                                          std::vector<Ciphertext<DCRTPoly>>& powers2) const;
@@ -99,6 +103,10 @@ public:
 
     Ciphertext<DCRTPoly> EvalPolyPS(ConstCiphertext<DCRTPoly> ciphertext,
                                   const std::vector<std::complex<double>>& coefficients) const override;
+
+    std::vector<std::vector<Ciphertext<DCRTPoly>>> ComputePowersPS(ConstCiphertext<DCRTPoly> x, size_t n) const override;
+
+    Ciphertext<DCRTPoly> EvalPolyPS(std::vector<Ciphertext<DCRTPoly>> powers, std::vector<Ciphertext<DCRTPoly>> powers2, Ciphertext<DCRTPoly> power2km1, const std::vector<std::complex<double>>& coefficients) const override;
 
     //------------------------------------------------------------------------------
     // EVAL CHEBYSHEV SERIES

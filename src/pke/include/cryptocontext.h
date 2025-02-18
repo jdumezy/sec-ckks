@@ -2717,6 +2717,21 @@ public:
         return GetScheme()->EvalPolyLinear(ciphertext, coefficients);
     }
 
+    std::vector<Ciphertext<DCRTPoly>> ComputePowersLinear(ConstCiphertext<DCRTPoly> x, size_t k) const {
+        ValidateCiphertext(x);
+
+        return GetScheme()->ComputePowersLinear(x, k);
+    }
+
+    Ciphertext<DCRTPoly> EvalPolyLinear(std::vector<Ciphertext<DCRTPoly>> powers, const std::vector<std::complex<double>>& coefficients) const{
+        size_t n = powers.size();
+        for (size_t i = 0; i < n; ++i) {
+            ValidateCiphertext(powers[i]);
+        }
+
+        return GetScheme()->EvalPolyLinear(powers, coefficients);
+    }
+
     /**
    * Paterson-Stockmeyer method for evaluation for polynomials represented in the power
    * series. Supported only in CKKS.
@@ -2736,6 +2751,28 @@ public:
         ValidateCiphertext(ciphertext);
 
         return GetScheme()->EvalPolyPS(ciphertext, coefficients);
+    }
+
+    std::vector<std::vector<Ciphertext<DCRTPoly>>> ComputePowersPS(ConstCiphertext<DCRTPoly> x, size_t n) const {
+        ValidateCiphertext(x);
+
+        return GetScheme()->ComputePowersPS(x, n);
+    }
+
+    Ciphertext<DCRTPoly> EvalPolyPS(std::vector<Ciphertext<DCRTPoly>> powers, std::vector<Ciphertext<DCRTPoly>> powers2, Ciphertext<DCRTPoly> power2km1, const std::vector<std::complex<double>>& coefficients) const{
+        size_t n = powers.size();
+        for (size_t i = 0; i < n; ++i) {
+            ValidateCiphertext(powers[i]);
+        }
+
+        n = powers2.size();
+        for (size_t i = 0; i < n; ++i) {
+            ValidateCiphertext(powers2[i]);
+        }
+
+        ValidateCiphertext(power2km1);
+
+        return GetScheme()->EvalPolyPS(powers, powers2, power2km1, coefficients);
     }
 
     //------------------------------------------------------------------------------
@@ -2890,6 +2927,16 @@ public:
 
     Ciphertext<Element> EvalHermiteFunction(std::function<double(double)> func, ConstCiphertext<Element> ciphertext,
                                             int p, int order) const;
+    Ciphertext<Element> EvalHermitePrecomLinearFunction(std::function<double(double)> func,
+                                                                             std::vector<Ciphertext<Element>> powers,
+                                                                             int p) const;
+
+    Ciphertext<Element> EvalHermitePrecomPSFunction(std::function<double(double)> func,
+                                                                         std::vector<Ciphertext<Element>> powers,
+                                                                         std::vector<Ciphertext<Element>> powers2,
+                                                                         Ciphertext<Element> power2km1,
+                                                                         int p) const;
+
 
     //------------------------------------------------------------------------------
     // Advanced SHE EVAL SUM
@@ -3475,14 +3522,14 @@ public:
    */
     void EvalBootstrapSetup(std::vector<uint32_t> levelBudget = {5, 4}, std::vector<uint32_t> dim1 = {0, 0},
                             uint32_t slots = 0, uint32_t correctionFactor = 0, bool precompute = true,
-                            bool stcFirst = false, bool functional = false) {
+                            bool stcFirst = false, bool functional = false, int bits = 0) {
         GetScheme()->EvalBootstrapSetup(*this, levelBudget, dim1, slots, correctionFactor, precompute,
-                                        stcFirst, functional);
+                                        stcFirst, functional, bits);
     }
 
     void EvalFuncBootstrapSetup(std::vector<uint32_t> levelBudget = {5, 4}, std::vector<uint32_t> dim1 = {0, 0},
-                                uint32_t slots = 0) {
-        GetScheme()->EvalFuncBootstrapSetup(*this, levelBudget, dim1, slots);
+                                uint32_t slots = 0, int bits = 0) {
+        GetScheme()->EvalFuncBootstrapSetup(*this, levelBudget, dim1, slots, bits);
     }
     /**
    * Generates all automorphism keys for EvalBootstrap. Supported in CKKS only.
@@ -3529,6 +3576,16 @@ public:
     Ciphertext<Element> EvalFuncBootstrap(ConstCiphertext<Element> ciphertext, std::function<double(double)> func,
                                           int num_poi, int order) const {
         return GetScheme()->EvalFuncBootstrap(ciphertext, func, num_poi, order);
+    }
+
+    std::vector<Ciphertext<Element>> EvalFuncMVBootstrap(ConstCiphertext<Element> ciphertext, std::vector<std::function<double(double)>> func_vec,
+                                                         int num_poi, int order) const {
+        return GetScheme()->EvalFuncMVBootstrap(ciphertext, func_vec, num_poi, order);
+    }
+
+    Ciphertext<DCRTPoly> EvalFuncSimpleTreeMVB(ConstCiphertext<DCRTPoly> ciphertext, std::function<double(double)> func,
+                                               int num_poi, int order) const {
+        return GetScheme()->EvalFuncSimpleTreeMVB(ciphertext, func, num_poi, order);
     }
 
     //------------------------------------------------------------------------------
@@ -3838,6 +3895,10 @@ public:
     }
     void SetSwkFC(Ciphertext<Element> FHEWtoCKKSswk) {
         GetScheme()->SetSwkFC(FHEWtoCKKSswk);
+    }
+
+    bool GetFbts() const {
+        return GetScheme()->GetFbts();
     }
 
     /**

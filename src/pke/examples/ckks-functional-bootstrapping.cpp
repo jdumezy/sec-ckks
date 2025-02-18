@@ -35,19 +35,21 @@
 
 using namespace lbcrypto;
 
-void FuncBootstrapExample(std::function<double(double)> f, int p);
+void FuncBootstrapExample(std::function<double(double)> f, int bits, int p);
 
 int main(int argc, char* argv[]) {
+    int bits = 4;
     // p will determine the plaintext space, which is [0..p-1]
-    int p = pow(2, 4);
+    int p = pow(2, bits);
 
     // f is the function that is evaluated during bootstrapping
-    auto f = [](double x) -> double { return x; };
+    auto f = [](double x) -> double { return (double) ((int)x % 2); };
+    /*auto f = [](double x) -> double { return x * x; };*/
 
-    FuncBootstrapExample(f, p);
+    FuncBootstrapExample(f, bits, p);
 }
 
-void FuncBootstrapExample(std::function<double(double)> f, int p) {
+void FuncBootstrapExample(std::function<double(double)> f, int bits, int p) {
     CCParams<CryptoContextCKKSRNS> parameters;
 
     SecretKeyDist secretKeyDist = SPARSE_TERNARY;
@@ -74,12 +76,12 @@ void FuncBootstrapExample(std::function<double(double)> f, int p) {
     parameters.SetScalingTechnique(rescaleTech);
     parameters.SetFirstModSize(firstMod);
 
-    // Those parameters offer a good tradeoff, you should not change them
-    std::vector<uint32_t> levelBudget = {3, 2};
+    std::vector<uint32_t> levelBudget = {4, 2};
 
     std::vector<uint32_t> bsgsDim = {0, 0};
 
-    usint depth = levelBudget[0] + levelBudget[1] + 12 + std::log2(p);
+    /*usint depth = levelBudget[0] + levelBudget[1] + 12 + std::log2(p);*/
+    usint depth = levelBudget[0] + levelBudget[1] + 1 + 5 + 4 + bits + 2;
     parameters.SetMultiplicativeDepth(depth);
 
     CryptoContext<DCRTPoly> cc = GenCryptoContext(parameters);
@@ -89,13 +91,15 @@ void FuncBootstrapExample(std::function<double(double)> f, int p) {
     cc->Enable(LEVELEDSHE);
     cc->Enable(ADVANCEDSHE);
     cc->Enable(FHE);
+    
+    cc->Enable(FBTS);
 
     usint ringDim = cc->GetRingDimension();
     std::cout << "CKKS scheme is using ring dimension " << ringDim << std::endl << std::endl;
 
     // Precomputations for bootstrapping
     int numSlots = ringDim/2;
-    cc->EvalFuncBootstrapSetup(levelBudget, bsgsDim, numSlots);
+    cc->EvalFuncBootstrapSetup(levelBudget, bsgsDim, numSlots, bits);
 
     // Key Generation
     auto keyPair = cc->KeyGen();
@@ -105,10 +109,10 @@ void FuncBootstrapExample(std::function<double(double)> f, int p) {
     // Input vector [0, 1, ..., p-2, p-1]
     std::vector<std::complex<double>> x;
     for (int i = 0; i < p; ++i) {
-        x.push_back((std::complex<double>)i);
+        x.push_back((std::complex<double>(i, p - i - 1)));
     }
 
-    Plaintext ptxt =  cc->MakeCKKSPackedPlaintext(x, 1, depth-(levelBudget[1]+1), nullptr, numSlots);
+    Plaintext ptxt =  cc->MakeCKKSPackedPlaintext(x, 1, depth - levelBudget[1], nullptr, numSlots);
     ptxt->SetLength(numSlots);
     std::cout << "Input = " << ptxt << std::endl;
 

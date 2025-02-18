@@ -24,7 +24,7 @@ You can refer to OpenFHE's guide on installation for your specific operating sys
 
 - [Windows](https://openfhe-development.readthedocs.io/en/latest/sphinx_rsts/intro/installation/windows.html)
 
-Note that all unit tests should run fine.
+Some unit test will fail with the current version of secCKKS (serialization).
 The project was tested on Ubuntu 24.04.1 LTS and compiled with clang++.
 
 ## Usage
@@ -46,6 +46,11 @@ auto ctxtResult = cc->EvalFuncBootstrap(ctxt, f, p, hermite_order);
 
 Please pay attention to the fact that `EvalFuncBootstrapSetup` should be called instead of `EvalBootstrapSetup` to use functional bootstrapping.
 
+For performances (especially multi-value bootstrapping), you should use the option:
+```bash
+export OMP_MAX_ACTIVE_LEVELS=4
+```
+
 ## Detailed Changelog
 
 - Fixed complex support for encoding
@@ -58,11 +63,19 @@ Please pay attention to the fact that `EvalFuncBootstrapSetup` should be called 
 
 - Added Hermite coefficients calculation and `EvalHermiteFunction` for Hermite interpolation for up to order 3
 
-- Added StC-first bootstrapping (experimental)
+- Added StC-first Bootstrapping (experimental)
 
-- Added Functional bootstrapping
+- Added Functional Bootstrapping with use of both real and imaginary components
+
+- Added Multi-Value Functional bootstrapping
+
+- Added Tree base method for Functional Bootstrapping (WIP)
 
 - Removed noise estimation and noise estimation unit tests
+
+- Added the `FBTS` option to round at decryption
+
+- Parallelization of (MV) Functional Bootstrapping with OpenMP
 
 ## License
 
